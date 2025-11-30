@@ -1,0 +1,7 @@
+zod
+react-hook-form
+firebase
+firebase-admin
+react-firebase-hooks
+@hookform/resolvers
+date-fns
