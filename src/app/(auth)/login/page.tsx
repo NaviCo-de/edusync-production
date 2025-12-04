@@ -53,47 +53,58 @@ export default function LoginScreen() {
     }
 
     return (
-        <div>
-            <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit, (errors) => {
-                    console.log("GAGAL SUBMIT:", errors)
-                })}>
-                    <FormField 
-                        control={form.control}
-                        name="email"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Email</FormLabel>
-                                <Input placeholder="example@gmail.com" {...field}/>
-                                <FormMessage />
-                            </FormItem>
+        <div className="flex justify-center items-center h-screen">
+            <div className="px-14 py-21 shadow-[0_0_20px_rgba(0,0,0,0.15)]">
+                <div className="text-center leading-none">
+                    <h1 className="text-blue-base font-bold text-h2">Welcome Back</h1>
+                    <h1 className="text-yellow-60 font-bold text-h3">SyncLearner!</h1>
+                </div>
+                <Form {...form}>
+                    <form onSubmit={form.handleSubmit(onSubmit, (errors) => {
+                        console.log("GAGAL SUBMIT:", errors)
+                    })}>
+                        <FormField 
+                            control={form.control}
+                            name="email"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <div>
+                                        <Input 
+                                            placeholder="Email" 
+                                            variant={"auth"}
+                                            icon={"public/email.png"}
+                                            {...field}
+                                        />
+                                    </div>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                        <FormField 
+                            control={form.control}
+                            name="password"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <Input type="password" {...field}/>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                        {globalError && (
+                            <p>
+                                Error: {globalError}
+                            </p> 
                         )}
-                    />
-                    <FormField 
-                        control={form.control}
-                        name="password"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Password</FormLabel>
-                                <Input type="password" {...field}/>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                    {globalError && (
-                        <p>
-                            Error: {globalError}
-                        </p> 
-                    )}
-                    <Button 
-                        type="submit"
-                        disabled={form.formState.isSubmitting}
-                    >
-                        {form.formState.isSubmitting ? "Sedang Login..." : "Login"}
-                    </Button>
-                </form>
+                        <Button 
+                            type="submit"
+                            disabled={form.formState.isSubmitting}
+                        >
+                            {form.formState.isSubmitting ? "Sedang Login..." : "Login"}
+                        </Button>
+                    </form>
 
-            </Form>
+                </Form>
+            </div>
         </div>
     )
 }
