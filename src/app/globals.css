@@ -29,6 +29,30 @@
   --color-yellow-90: #554B11;
   --color-yellow-100: #332D0A;
 
+  --color-addition-blue-base: #DAE1FF;
+  --color-addition-blue-10: #F8F9FF;
+  --color-addition-blue-20: #F3F5FF;
+  --color-addition-blue-30: #ECF0FF;
+  --color-addition-blue-40: #E6EBFF;
+  --color-addition-blue-50: #E0E6FF;
+  --color-addition-blue-60: #B6BBD4;
+  --color-addition-blue-70: #9196AA;
+  --color-addition-blue-80: #6D7180;
+  --color-addition-blue-90: #494B55;
+  --color-addition-blue-100: #2C2D33;
+
+  --color-addition-yellow-base: #FFF9D6;
+  --color-addition-yellow-10: #FFFEF7;
+  --color-addition-yellow-20: #FFFDF1;
+  --color-addition-yellow-30: #FFFCEA;
+  --color-addition-yellow-40: #FFFBE4;
+  --color-addition-yellow-50: #FFFADD;
+  --color-addition-yellow-60: #D4CFB2;
+  --color-addition-yellow-70: #AAA68F;
+  --color-addition-yellow-80: #807D6B;
+  --color-addition-yellow-90: #555347;
+  --color-addition-yellow-100: #33322B;
+
   /* FONT */
   --text-h1: 60px;
   --text-h2: 48px;

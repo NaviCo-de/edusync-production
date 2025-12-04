@@ -33,5 +33,12 @@ export const registerSchema = loginSchema.extend({
     path: ["confirmPassword"]
 })
 
+export const tugasSchema = z.object({
+    judul_tugas: z.string().min(1, "Judul tidak boleh kosong"),
+    deskripsi: z.string(),
+    soal: z.string().min(1, "SOAL MINIMAL 1 KARAKTER!"),
+    deadline: z.date(),
+})
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;

@@ -1,21 +1,52 @@
 import * as React from "react"
-
+import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
-  return (
-    <input
-      type={type}
-      data-slot="input"
-      className={cn(
-        "file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
-        "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
-        "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
-        className
-      )}
-      {...props}
-    />
-  )
+const inputVariants = cva(
+  "flex h-10 w-full px-8 py-4",
+  {
+    variants: {
+      variant: {
+        auth: "border-input rounded-[20px] h-19 bg-addition-blue-30 border-none text-b6 text-addition-blue-80 font-bold",
+        filled: "border-none bg-slate-100 focus-visible:ring-blue-500", // Style Custom kamu (Background abu, no border)
+      },
+    },
+    defaultVariants: {
+      variant: "auth",
+    },
+  }
+)
+
+export interface InputProps
+  extends React.InputHTMLAttributes<HTMLInputElement>,
+    VariantProps<typeof inputVariants> {
+  icon?: React.ReactNode; // Bisa nerima komponen Icon apa aja
 }
+
+const Input = React.forwardRef<HTMLInputElement, InputProps>(
+  ({ className, variant, icon, type, ...props }, ref) => {
+    return (
+      // 3. LOGIC WRAPPER OTOMATIS
+      <div className="relative w-full">
+        <input
+          type={type}
+          className={cn(
+            inputVariants({ variant, className }),
+            icon && "pr-10" // Kalau ada icon, otomatis tambah padding kanan biar gak nabrak
+          )}
+          ref={ref}
+          {...props}
+        />
+        
+        {/* Render Icon kalau ada props-nya */}
+        {icon && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+            {icon}
+          </div>
+        )}
+      </div>
+    )
+  }
+)
 
 export { Input }
