@@ -38,7 +38,7 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-full h-19 bg-addition-blue-30 items-center justify-between gap-2 rounded-[20px] px-8 py-4 text-b6 font-semibold text-addition-blue-80 whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none",
+        "flex group w-full h-19 bg-addition-blue-30 items-center justify-between gap-2 rounded-[20px] px-8 py-4 text-b6 font-semibold text-black data-placeholder:text-addition-blue-80 whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none",
         className
       )}
       {...props}
@@ -50,6 +50,7 @@ function SelectTrigger({
           alt="Chevron Down"
           width={42}
           height={36}
+          className="group-data-[state=open]:rotate-180 transition-transform duration-200"
         />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
@@ -80,7 +81,6 @@ function SelectContent({
         <SelectScrollUpButton />
         <SelectPrimitive.Viewport
           className={cn(
-            "p-1",
             position === "popper" &&
               "h-(--radix-select-trigger-height) w-full min-w-(--radix-select-trigger-width) scroll-my-1"
           )}
@@ -115,7 +115,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "focus:bg-accent focus:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        "focus:bg-addition-blue-60 focus:text-white text-addition-blue-80 relative flex w-full cursor-default items-center gap-2 py-1.5 pr-8 pl-2 text-b7 font-bold outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
         className
       )}
       {...props}

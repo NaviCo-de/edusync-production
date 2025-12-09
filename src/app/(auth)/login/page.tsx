@@ -20,6 +20,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import Image from "next/image";
+import { CustomIcon } from "@/components/ui/CustomIcon";
 
 export default function LoginScreen() {
     const router = useRouter()
@@ -44,8 +45,14 @@ export default function LoginScreen() {
 
             if (userDoc.exists()) {
                 console.log("Login Berhasil")
+                if (userDoc.data().role == 'MURID') {
+                    router.push('/dashboard-murid')
+                } else if (userDoc.data().role == 'GURU') {
+                    router.push('/dashboard-guru')
+                }
             } else {
                 console.error("Data user tidak ditemukan")
+                
             }
         } catch (e) {
             console.error("Gagal Login:", e)
@@ -77,11 +84,8 @@ export default function LoginScreen() {
                                             <Input 
                                                 placeholder="Email"
                                                 variant={"auth"}
-                                                icon={<Image 
+                                                icon={<CustomIcon 
                                                     src={"/email.png"}
-                                                    alt="Email"
-                                                    width={500}
-                                                    height={500}
                                                     className="w-9 h-9"
                                                 />}
                                                 {...field}
@@ -101,11 +105,8 @@ export default function LoginScreen() {
                                                 placeholder="Password"
                                                 type="password"
                                                 variant={"auth"}
-                                                icon={<Image 
+                                                icon={<CustomIcon 
                                                     src={"/password.png"}
-                                                    alt="Password"
-                                                    width={500}
-                                                    height={500}
                                                     className="w-9 h-9"
                                                 />}
                                                 {...field}

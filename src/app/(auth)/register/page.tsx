@@ -34,6 +34,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import Image from "next/image";
+import { CustomIcon } from "@/components/ui/CustomIcon";
 
 export default function RegisterScreen() {
     const router = useRouter()
@@ -44,7 +45,7 @@ export default function RegisterScreen() {
         defaultValues: {
             nama: "",
             email: "",
-            role: "Murid",
+            role: "MURID",
             password: "",
             confirmPassword: "",
         }
@@ -60,15 +61,33 @@ export default function RegisterScreen() {
 
             const user = userCredential.user;
 
-            const userData = {
+            const baseData = {
                 uid: user.uid,
                 nama: data.nama,
                 role: data.role,
+                telepon: data.telepon,
                 tanggalLahir: data.tanggalLahir,
                 email: data.email,
+                createdAt: new Date(),
             };
 
-            await setDoc(doc(db, "users", userData.uid), userData);
+            let roleSpecificData = {};
+
+            if (data.role === 'MURID') {
+                roleSpecificData = {
+                    enrolledClassIds: [],
+                    assignmentGrades: {}
+                };
+            } else if (data.role === 'GURU') {
+                roleSpecificData = {
+                    createdClassIds: [],
+                };
+            }
+
+            await setDoc(doc(db, "users", user.uid), {
+                ...baseData,
+                ...roleSpecificData
+            });
             console.log("Login Berhasil")
             router.push('/login')
         } catch (e: any) {
@@ -97,14 +116,11 @@ export default function RegisterScreen() {
                                 render={({ field }) => (
                                     <FormItem>
                                         <FormControl>
-                                            <Input 
+                                            <Input
                                                 placeholder="Nama Lengkap"
                                                 variant={"auth"}
-                                                icon={<Image 
+                                                icon={<CustomIcon
                                                     src={"/user.png"}
-                                                    alt="User"
-                                                    width={500}
-                                                    height={500}
                                                     className="w-9 h-9"
                                                 />}
                                                 {...field} 
@@ -115,31 +131,6 @@ export default function RegisterScreen() {
                                 )}
                             />
                             
-                            <FormField
-                                control={form.control}
-                                name="role"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <Select
-                                            onValueChange={field.onChange}
-                                            defaultValue={field.value}
-                                            value={field.value}
-                                        >
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Pilih peranmu disini" />
-                                                </SelectTrigger>
-                                            </FormControl>
-
-                                            <SelectContent>
-                                                <SelectItem value="Guru">Guru</SelectItem>
-                                                <SelectItem value="Murid">Murid</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
                             <FormField 
                                 control={form.control}
                                 name="tanggalLahir"
@@ -148,22 +139,19 @@ export default function RegisterScreen() {
                                         <Popover>
                                             <PopoverTrigger asChild>
                                                 <FormControl>
-                                                    <Button
-                                                        className="flex justify-between rounded-[20px] bg-addition-blue-30 px-8 py-4 h-19 text-b6 text-addition-blue-80 font-bold hover:bg-addition-blue-30"
+                                                    <div
+                                                        className="flex justify-between items-center text-black rounded-[20px] bg-addition-blue-30 px-8 py-4 h-19 text-b6 font-bold hover:bg-addition-blue-30"
                                                     >
                                                         {field.value ? (
                                                             format(field.value, "PPP")
                                                         ) : (
-                                                            <span>Pilih tanggal lahir</span>
+                                                            <span className="text-addition-blue-80">Pilih tanggal lahir</span>
                                                         )}
-                                                        <Image 
+                                                        <CustomIcon
                                                             src={"/calendar.png"}
-                                                            alt="Calendar"
-                                                            width={500}
-                                                            height={500}
                                                             className="w-9 h-9"
                                                         />
-                                                    </Button>
+                                                    </div>
                                                 </FormControl>
                                             </PopoverTrigger>
                                             <PopoverContent>
@@ -185,6 +173,7 @@ export default function RegisterScreen() {
                                     </FormItem>
                                 )}
                             />
+                            
                             <FormField
                                 control={form.control}
                                 name="email"
@@ -194,11 +183,8 @@ export default function RegisterScreen() {
                                             <Input 
                                                 placeholder="Email"
                                                 variant={"auth"}
-                                                icon={<Image 
+                                                icon={<CustomIcon
                                                     src={"/email.png"}
-                                                    alt="Email"
-                                                    width={500}
-                                                    height={500}
                                                     className="w-9 h-9"
                                                 />}
                                                 {...field} 
@@ -208,6 +194,7 @@ export default function RegisterScreen() {
                                     </FormItem>
                                 )}
                             />
+
                             <FormField
                                 control={form.control}
                                 name="telepon"
@@ -217,11 +204,8 @@ export default function RegisterScreen() {
                                             <Input 
                                                 placeholder="No Telepon"
                                                 variant={"auth"}
-                                                icon={<Image 
+                                                icon={<CustomIcon
                                                     src={"/phone.png"}
-                                                    alt="Telepon"
-                                                    width={500}
-                                                    height={500}
                                                     className="w-9 h-9"
                                                 />}
                                                 {...field} 
@@ -231,6 +215,33 @@ export default function RegisterScreen() {
                                     </FormItem>
                                 )}
                             />
+
+                            <FormField
+                                control={form.control}
+                                name="role"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <Select
+                                            onValueChange={field.onChange}
+                                            defaultValue={field.value}
+                                            value={field.value}
+                                        >
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Pilih peranmu disini" />
+                                                </SelectTrigger>
+                                            </FormControl>
+
+                                            <SelectContent className="bg-addition-blue-30 ">
+                                                <SelectItem value="GURU">Guru</SelectItem>
+                                                <SelectItem value="MURID">Murid</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            
                             <div className="flex justify-center items-start gap-5">
                                 <FormField
                                     control={form.control}
@@ -241,11 +252,8 @@ export default function RegisterScreen() {
                                                 <Input
                                                     placeholder="Password"
                                                     variant={"auth"}
-                                                    icon={<Image 
+                                                    icon={<CustomIcon
                                                         src={"/password.png"}
-                                                        alt="Password"
-                                                        width={500}
-                                                        height={500}
                                                         className="w-9 h-9"
                                                     />}
                                                     type="password" 
@@ -265,11 +273,8 @@ export default function RegisterScreen() {
                                                 <Input
                                                     placeholder="Confirm Password"
                                                     variant={"auth"}
-                                                    icon={<Image 
+                                                    icon={<CustomIcon
                                                         src={"/password.png"}
-                                                        alt="Confirm Password"
-                                                        width={500}
-                                                        height={500}
                                                         className="w-9 h-9"
                                                     />}
                                                     type="password"
@@ -281,8 +286,8 @@ export default function RegisterScreen() {
                                     )}
                                 />
                             </div>
+                        <a href="/login" className="text-sh7 text-blue-base text-right">Already have an account? <span className="font-bold hover:underline">Log in here</span></a>
                         </div>
-
                         {globalError && (
                             <p>
                                 Error: {globalError}
@@ -292,8 +297,9 @@ export default function RegisterScreen() {
                         <Button
                             type="submit"
                             disabled={form.formState.isSubmitting}
+                            className="rounded-[20px] px-8 py-4 text-b5 text-white font-semibold w-46 h-16 bg-blue-base"
                         >
-                            {form.formState.isSubmitting ? "Sedang Mendaftar..." : "Daftar Sekarang"}
+                            {form.formState.isSubmitting ? "Sedang Mendaftar..." : "Sign Up"}
                         </Button>
                     </form>
                 </Form>

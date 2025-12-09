@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const ROLE = ["Guru", "Murid"] as const;
+export const ROLE = ["GURU", "MURID"] as const;
 
 export const loginSchema = z.object({
     email: z.string().email({ message: "Email tidak valid" }),
