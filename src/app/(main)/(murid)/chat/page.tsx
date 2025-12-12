@@ -28,7 +28,7 @@ import { db } from '@/lib/firebase';
 import Image from 'next/image';
 
 // URL Backend
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"; 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://lynx-ai-production.up.railway.app"; 
 
 type Message = {
   id?: string;
@@ -45,7 +45,7 @@ type ChatSession = {
   last_updated: any;
 };
 
-// --- KOMPONEN INPUT (DIPISAH SUPAYA KEYBOARD AMAN) ---
+// --- KOMPONEN INPUT AREA (DIPISAH SUPAYA KEYBOARD AMAN) ---
 type InputAreaProps = {
   input: string;
   setInput: (val: string) => void;
@@ -154,7 +154,7 @@ export default function ChatPage() {
   
   // State UI & Hover
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isHovered, setIsHovered] = useState(false); // Untuk efek hover logo
+  const [isHovered, setIsHovered] = useState(false); 
   
   // File Upload
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -188,7 +188,7 @@ export default function ChatPage() {
     return () => unsubscribe();
   }, [user]);
 
-  // 3. FETCH MESSAGES
+  // 3. FETCH MESSAGES & SORTING FIX
   useEffect(() => {
     if (!sessionId) return;
     const q = query(
@@ -200,6 +200,22 @@ export default function ChatPage() {
         id: doc.id,
         ...doc.data()
       })) as Message[];
+
+      // [UPDATE] Manual Sort untuk mengatasi Timestamp Kembar
+      msgs.sort((a, b) => {
+        // Ambil waktu (jika null anggap 0)
+        const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+        const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+        
+        // 1. Sort berdasarkan waktu
+        if (tA !== tB) return tA - tB;
+        
+        // 2. Jika waktu sama persis (Batch Write), User WAJIB di atas Model
+        if (a.role === 'user' && b.role === 'model') return -1;
+        if (a.role === 'model' && b.role === 'user') return 1;
+        return 0;
+      });
+
       setMessages(msgs);
     });
     return () => unsubscribe();
@@ -345,7 +361,6 @@ export default function ChatPage() {
 
   // --- RENDER UTAMA ---
   return (
-    // [UPDATE] Kembali ke layout Flex Relative (Bukan Fixed) agar sesuai header
     <div className="relative flex h-[calc(100vh-120px)] w-full bg-[#F8F9FC] overflow-hidden rounded-[20px] my-6">
       
       {/* SIDEBAR */}
@@ -381,7 +396,7 @@ export default function ChatPage() {
                     </h2>
                 </div>
 
-                {/* LOGO PINTU (Toggle Button) + Hover Effect */}
+                {/* LOGO PINTU (Toggle Button) */}
                 <button 
                     onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                     onMouseEnter={() => setIsHovered(true)}
@@ -389,11 +404,9 @@ export default function ChatPage() {
                     className="relative shrink-0 hover:scale-105 transition-transform"
                     title="Toggle Sidebar"
                 >
-                    {/* [UPDATE] Size Logo w-9 h-9 */}
                     <div className={cn("relative transition-all", isSidebarOpen ? "w-9 h-9" : "w-9 h-9")}>
-                        {/* [UPDATE] Ganti gambar saat hover */}
                         <Image 
-                            src={isHovered ? "/book_hovered.svg" : "/door.png"} 
+                            src={isHovered ? "/door_hovered.svg" : "/door.svg"} 
                             alt="Toggle Sidebar" 
                             fill 
                             className="object-contain"
@@ -402,7 +415,7 @@ export default function ChatPage() {
                 </button>
             </div>
 
-            {/* Tombol New Chat (HANYA MUNCUL JIKA SIDEBAR OPEN) */}
+            {/* [UPDATE] Tombol New Chat (HILANG JIKA SIDEBAR TUTUP) */}
             {isSidebarOpen && (
                 <div className="shrink-0 w-full animate-in fade-in zoom-in duration-300">
                     <Button 
@@ -440,7 +453,7 @@ export default function ChatPage() {
                 ))}
             </div>
 
-            {/* Footer Back (HANYA MUNCUL JIKA SIDEBAR OPEN) */}
+            {/* [UPDATE] Footer Back (HILANG JIKA SIDEBAR TUTUP) */}
             {isSidebarOpen && (
                 <div className="pt-3 w-full border-t border-gray-100 shrink-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
                     <Button 
@@ -467,7 +480,7 @@ export default function ChatPage() {
                 className="bg-white shadow-sm border-gray-200"
             >
                <div className="relative w-6 h-6">
-                  <Image src="/door.png" alt="Toggle" fill className="object-contain" />
+                  <Image src="/door.svg" alt="Toggle" fill className="object-contain" />
                </div>
             </Button>
         </div>
@@ -476,7 +489,6 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center p-8 gap-6 animate-in fade-in zoom-in duration-500">
                <div className="flex items-center gap-4 mb-2">
-                   {/* [UPDATE] Logo Empty State GEDE (w-28) */}
                    <div className="relative w-24 h-24 md:w-28 md:h-28 shrink-0">
                       <Image 
                         src="/lynx_logo.png" 
