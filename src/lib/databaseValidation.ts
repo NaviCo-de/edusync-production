@@ -41,5 +41,18 @@ export const tugasSchema = z.object({
     deadline: z.date(),
 })
 
+export const assignmentSchema = z.object({
+  title: z.string().min(3, "Judul tugas minimal 3 karakter"),
+  instructions: z.string().optional(),
+  points: z.coerce.number() // coerce biar string "100" jadi number 100
+    .min(0, "Poin tidak boleh minus")
+    .max(100, "Poin maksimal 100"),
+  dueDate: z.string().optional().refine((val) => {
+    if (!val) return true; // Boleh kosong
+    return new Date(val) > new Date();
+  }, "Deadline harus lebih dari waktu sekarang"),
+});
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type AssignmentFormValues = z.infer<typeof assignmentSchema>;
