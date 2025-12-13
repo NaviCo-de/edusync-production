@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useUserProfile } from '@/lib/hooks/useUserProfile';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, Send, X, FileText, Plus } from 'lucide-react';
+import { Search, Send, X, FileText, Plus, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
@@ -78,8 +78,9 @@ type Message = {
   type?: 'text' | 'flashcard' | 'error';
   data?: any; 
   timestamp?: any;
-  createdAt?: number; // Added for local sorting fallback
+  createdAt?: number; 
   imageUrl?: string;
+  fileName?: string; // [ADDED] Untuk mendeteksi nama file di UI
 };
 
 type ChatSession = {
@@ -147,33 +148,22 @@ export default function ChatPage() {
     return () => unsubscribe();
   }, [user]);
 
-  // FETCH MESSAGES & SORTING FIX
+  // FETCH MESSAGES
   useEffect(() => {
     if (!sessionId) return;
-    // Kita query berdasarkan timestamp, tapi sorting final dilakukan di client
     const q = query(collection(db, 'chat_rooms', sessionId, 'messages'));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Message[];
       
-      // [FIXED SORTING LOGIC]
       msgs.sort((a, b) => {
-        // Ambil waktu. Jika pending/null, gunakan createdAt (jika ada) atau Date.now() sebagai fallback.
-        // NOTE: Pesan pending biasanya adalah pesan User yang baru dikirim.
         const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.createdAt || Date.now());
         const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.createdAt || Date.now());
-
         const diff = timeA - timeB;
-
-        // Jika selisih waktu sangat kecil (< 1 detik) atau identik (batch write dari backend),
-        // gunakan ROLE sebagai penentu urutan.
-        // Logic: Pertanyaan (User) harus selalu DI ATAS Jawaban (Model).
         if (Math.abs(diff) < 1000) {
-            if (a.role === 'user' && b.role === 'model') return -1; // User sebelum Model
-            if (a.role === 'model' && b.role === 'user') return 1;  // Model setelah User
+            if (a.role === 'user' && b.role === 'model') return -1;
+            if (a.role === 'model' && b.role === 'user') return 1; 
         }
-        
-        // Default sort by time (Ascending: Lama -> Baru)
         return diff;
       });
       
@@ -216,7 +206,8 @@ export default function ChatPage() {
       formData.append("file", file);
       formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET || "");
     try {
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+      // [CRITICAL FIX] Ganti 'image/upload' ke 'auto/upload' agar support PDF & Raw Files
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`, {
         method: "POST",
         body: formData
       });
@@ -237,27 +228,27 @@ export default function ChatPage() {
     const currentFile = selectedFile;
     const isFirstMessage = messages.length === 0; 
     
-    // [OPTIMISTIC UI]
-    // Tambahkan createdAt: Date.now() agar sorting logic bisa menggunakannya
-    // sebelum serverTimestamp() tersedia.
+    // [OPTIMISTIC UI] 
+    // Handle PDF agar tetap muncul di UI meski tidak ada preview image
+    const tempFileUrl = currentFile ? (preview || URL.createObjectURL(currentFile)) : undefined;
+
     const tempUserMessage: Message = {
       id: uuidv4(),
       role: 'user',
       content: userMsg,
       type: 'text',
-      imageUrl: preview || undefined,
+      imageUrl: tempFileUrl, 
+      fileName: currentFile?.name, // Simpan nama file untuk rendering
       timestamp: null,
-      createdAt: Date.now() // Critical for sorting
+      createdAt: Date.now()
     };
 
-    // Gunakan functional update agar aman
     setMessages((prev) => [...prev, tempUserMessage]); 
     setInput('');
     clearFile();
     setLoading(true);
 
     try {
-      // 1. Set Title jika pesan pertama
       if (isFirstMessage) {
          await setDoc(doc(db, 'chat_rooms', sessionId), {
            user_id: user.uid,
@@ -266,17 +257,14 @@ export default function ChatPage() {
          }, { merge: true });
       }
 
-      // 2. Upload Image
       let fileUrl = "";
       if (currentFile) fileUrl = await uploadToCloudinary(currentFile);
 
-      // 3. Request Backend
-      // Backend akan menulis ke Firestore. onSnapshot akan menangkap perubahannya.
       let payload: any = {
-        message: userMsg || (currentFile ? "Lampiran Gambar" : ""),
+        message: userMsg || (currentFile ? "Lampiran File" : ""),
         session_id: sessionId,
         user_id: user.uid,
-        history: [], // Bisa dioptimalkan dengan mengirim last N messages
+        history: [], 
         image_url: fileUrl ? fileUrl : null 
       };
       
@@ -284,9 +272,8 @@ export default function ChatPage() {
 
     } catch (error) {
       console.error("Error sending message:", error);
-      // Optional: Beri tahu user jika error, misalnya hapus pesan optimistic
-      setMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
       alert("Gagal mengirim pesan.");
+      setMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
     } finally {
       setLoading(false);
     }
@@ -297,6 +284,10 @@ export default function ChatPage() {
 
   const renderMessage = (msg: Message, index: number) => {
     const isUser = msg.role === 'user';
+    
+    // Helper: Cek apakah file adalah PDF atau bukan gambar
+    const isPdfOrDoc = msg.imageUrl && (msg.imageUrl.toLowerCase().endsWith('.pdf') || msg.fileName?.toLowerCase().endsWith('.pdf') || !msg.imageUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i));
+
     return (
       <div key={msg.id || index} className={cn("flex w-full mb-4", isUser ? "justify-end" : "justify-start")}>
         <div className={cn("flex max-w-[85%] md:max-w-[70%] gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
@@ -308,11 +299,32 @@ export default function ChatPage() {
             )}
           </div>
           <div className={cn("leading-relaxed transition-all overflow-hidden", FIGMA_CHAT.bubbles.padding, FIGMA_CHAT.bubbles.radius, FIGMA_CHAT.bubbles.textSize, FIGMA_CHAT.bubbles.shadow, isUser ? `${FIGMA_CHAT.bubbles.userBg} ${FIGMA_CHAT.bubbles.userText} rounded-tr-none` : `${FIGMA_CHAT.bubbles.botBg} ${FIGMA_CHAT.bubbles.botText} ${FIGMA_CHAT.bubbles.botBorder} rounded-tl-none`)}>
+            
+            {/* [CRITICAL FIX] Rendering File logic */}
             {msg.imageUrl && (
-              <div className="mb-3 rounded-lg overflow-hidden border border-white/20">
-                <img src={msg.imageUrl} alt="Uploaded content" className="max-w-full h-auto object-cover max-h-[300px]" />
+              <div className="mb-3">
+                {isPdfOrDoc ? (
+                  // Tampilan untuk PDF/Dokumen
+                  <div className={cn("flex items-center gap-3 p-2 rounded-lg border bg-white/10 border-white/20 backdrop-blur-sm", isUser ? "text-white" : "text-gray-800 border-gray-200 bg-gray-50")}>
+                    <div className="bg-white/20 p-2 rounded shrink-0">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <span className="text-xs font-bold truncate max-w-[150px]">{msg.fileName || "Dokumen Lampiran"}</span>
+                      <a href={msg.imageUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] underline opacity-80 hover:opacity-100 flex items-center gap-1">
+                        Lihat Dokumen <Download className="w-3 h-3"/>
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  // Tampilan untuk Gambar
+                  <div className="rounded-lg overflow-hidden border border-white/20">
+                    <img src={msg.imageUrl} alt="Uploaded content" className="max-w-full h-auto object-cover max-h-[300px]" />
+                  </div>
+                )}
               </div>
             )}
+
             {msg.type === 'flashcard' ? (
                <div className="space-y-3 min-w-[250px]">
                   <div className={cn("flex items-center gap-2 border-b pb-2 mb-2", FIGMA_CHAT.flashcard.borderColor)}><span className="font-bold">📚 Flashcard Set</span></div>
