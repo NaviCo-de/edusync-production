@@ -1,53 +1,306 @@
-'use client';
+"use client";
 
-import { useUserProfile } from '@/lib/hooks/useUserProfile';
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useUserProfile } from "@/lib/hooks/useUserProfile";
+import { db } from "@/lib/firebase";
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  doc, 
+  getDoc, // [PENTING] Untuk ambil nama kelas
+  updateDoc, 
+  arrayUnion, 
+  setDoc,
+  serverTimestamp,
+  orderBy, // [PENTING] Untuk urutkan pengumuman
+  limit // [PENTING] Cuma ambil 1 per kelas
+} from "firebase/firestore";
+
+// UI Components
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Plus, Loader2, BookOpen, Bell } from "lucide-react";
+
+// Import Sonner & Components
+import { toast } from "sonner"; 
+import { ClassCard } from "../components/ClassCard";
+import { format } from "date-fns"; // [OPSIONAL] Install date-fns kalau belum: npm i date-fns
+import { id as ind } from "date-fns/locale"; // Locale Indonesia
+
+// Interface untuk data gabungan Pengumuman + Info Kelas
+interface DashboardAnnouncement {
+  id: string;
+  content: string;
+  createdAt: any;
+  classId: string;
+  className: string; // Nama kelasnya (misal: Matematika X)
+}
 
 export default function DashboardMurid() {
-  // Panggil hook sakti kita
   const { user, loading, error } = useUserProfile();
+  const router = useRouter();
+  
+  // State Modal Join
+  const [open, setOpen] = useState(false);
+  const [inputCode, setInputCode] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
 
-  // 1. Handle Loading (Wajib ada biar gak error 'cannot read property of null')
-  if (loading) {
-    return <div className="p-10">Sedang memuat data murid...</div>;
-  }
+  // [BARU] State untuk Pengumuman Dashboard
+  const [recentUpdates, setRecentUpdates] = useState<DashboardAnnouncement[]>([]);
+  const [loadingUpdates, setLoadingUpdates] = useState(true);
 
-  // 2. Handle Error atau User Kosong (Proteksi)
-  if (error) return <div className="text-red-500">{error}</div>;
-  if (!user) return <div>Anda belum login.</div>;
+  // --- 1. FETCH PENGUMUMAN TERBARU (DARI SEMUA KELAS) ---
+  useEffect(() => {
+    const fetchRecentUpdates = async () => {
+      // Tunggu user & daftarKelas siap
+      if (!user || !user.daftarKelas || user.daftarKelas.length === 0) {
+        setLoadingUpdates(false);
+        return;
+      }
 
-  // 3. Render UI Utama
+      try {
+        // Kita fetch secara paralel untuk semua kelas yang diikuti
+        const promises = user.daftarKelas.map(async (classId) => {
+          // A. Ambil Info Kelas (Kita butuh Namanya)
+          const classRef = doc(db, "classes", classId);
+          const classSnap = await getDoc(classRef);
+          
+          if (!classSnap.exists()) return null; // Skip kalau kelas udah dihapus
+          const className = classSnap.data().name || "Kelas Tanpa Nama";
+
+          // B. Ambil 1 Pengumuman Terbaru dari sub-collection
+          const announcementsRef = collection(db, "classes", classId, "announcements");
+          const q = query(announcementsRef, orderBy("createdAt", "desc"), limit(1));
+          const annSnap = await getDocs(q);
+
+          if (annSnap.empty) return null; // Skip kalau gak ada pengumuman
+
+          const annData = annSnap.docs[0].data();
+          
+          return {
+            id: annSnap.docs[0].id,
+            content: annData.content,
+            createdAt: annData.createdAt,
+            classId: classId,
+            className: className,
+          } as DashboardAnnouncement;
+        });
+
+        // Tunggu semua selesai
+        const results = await Promise.all(promises);
+
+        // Filter yang null (kelas tanpa pengumuman) & Urutkan global by date
+        const validResults = results
+          .filter((item): item is DashboardAnnouncement => item !== null)
+          .sort((a, b) => {
+             const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
+             const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
+             return dateB.getTime() - dateA.getTime(); // Descending (Terbaru di atas)
+          });
+
+        setRecentUpdates(validResults);
+
+      } catch (err) {
+        console.error("Gagal fetch updates:", err);
+      } finally {
+        setLoadingUpdates(false);
+      }
+    };
+
+    fetchRecentUpdates();
+  }, [user]); // Jalan ulang kalau user berubah
+
+
+  // --- 2. LOGIC GABUNG KELAS (TETAP SAMA) ---
+  const handleJoinClass = async () => {
+    if (!inputCode) return;
+    setIsJoining(true);
+
+    try {
+      const classesRef = collection(db, "classes"); 
+      const q = query(classesRef, where("code", "==", inputCode)); 
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        toast.error("Kelas tidak ditemukan", { description: "Kode kelas salah." });
+        setIsJoining(false);
+        return;
+      }
+
+      const classDoc = querySnapshot.docs[0];
+      const classId = classDoc.id;
+      const classData = classDoc.data();
+
+      if (user?.daftarKelas?.includes(classId)) {
+        toast.warning("Sudah Bergabung", { description: "Kamu sudah terdaftar." });
+        setIsJoining(false);
+        return;
+      }
+
+      await Promise.all([
+        setDoc(doc(db, "classes", classId, "students", user!.uid), {
+          uid: user!.uid,
+          nama: user!.nama,
+          email: user!.email,
+          role: "MURID", 
+          joinedAt: serverTimestamp(),
+        }),
+        updateDoc(doc(db, "users", user!.uid), {
+          daftarKelas: arrayUnion(classId) 
+        })
+      ]);
+
+      setOpen(false);
+      setInputCode("");
+      toast.success("Berhasil Bergabung!", { description: `Kelas ${classData.name}` });
+      window.location.reload(); 
+
+    } catch (err) {
+      console.error(err);
+      toast.error("Gagal Bergabung");
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
+  // --- HELPER DATE FORMAT ---
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return "";
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    // Kalau belum install date-fns, pakai: return date.toLocaleDateString();
+    return format(date, "d MMM, HH:mm", { locale: ind }); 
+  };
+
+
+  // --- RENDER ---
+  if (loading) return <div className="p-10 text-center">Memuat data murid...</div>;
+  if (error) return <div className="p-10 text-red-500 font-bold text-center">{error}</div>;
+  if (!user) return <div className="p-10 text-center">Sesi habis. Silakan login kembali.</div>;
+
   return (
-    <div className="px-20">
-      <header className="mb-8">
-        <h1 
-          className="text-sh2 font-bold w-fit
-                    bg-linear-to-r from-blue-20 via-blue-40 to-blue-base
-                    bg-clip-text text-transparent"
-          >
-          Welcome Again, {user.nama}!
-        </h1>
-        <p className="text-gray-600">
-          Email: {user.email} | Status: {user.role}
-        </p>
+    <div className="px-6 md:px-20 py-10 min-h-screen bg-gray-50/50">
+      
+      {/* HEADER */}
+      <header className="mb-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+            <h1 className="text-3xl font-bold bg-linear-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent w-fit">
+                Halo, {user.nama}!
+            </h1>
+            <p className="text-gray-500 mt-1">
+                Selamat datang kembali.
+            </p>
+        </div>
+
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition-transform active:scale-95">
+              <Plus className="mr-2 h-4 w-4" />
+              Gabung Kelas
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Gabung Kelas Baru</DialogTitle>
+              <DialogDescription>Masukkan kode unik kelas.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="code" className="text-right">Kode</Label>
+                <Input
+                  id="code"
+                  placeholder="Kode Kelas"
+                  className="col-span-3 font-bold text-center uppercase"
+                  value={inputCode}
+                  onChange={(e) => setInputCode(e.target.value)}
+                  disabled={isJoining}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={handleJoinClass} disabled={isJoining || !inputCode} className="w-full sm:w-auto">
+                {isJoining ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Gabung Sekarang"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </header>
 
-      {/* Contoh menampilkan kartu kelas */}
-      <section>
-        <h2 className="text-xl font-semibold mb-4">Kelas Saya</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {user.daftarKelas && user.daftarKelas.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-             {/* Nanti di sini kita map array enrolledClassIds buat fetch data kelas */}
-             <div className="p-4 border rounded shadow">
-                Kelas ID: {user.daftarKelas[0]}
-             </div>
+        {/* KOLOM KIRI (LIST KELAS) - Lebar 2/3 */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="flex items-center gap-3">
+              <BookOpen className="h-5 w-5 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-800">Kelas Saya</h2>
           </div>
-        ) : (
-          <div className="p-6 bg-yellow-50 border border-yellow-200 rounded text-yellow-700">
-            Kamu belum bergabung ke kelas manapun. Masukkan kode kelas dari guru!
-          </div>
-        )}
-      </section>
+          
+          {user.daftarKelas && user.daftarKelas.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+               {user.daftarKelas.map((classId: string) => (
+                  <ClassCard key={classId} classId={classId} />
+               ))}
+            </div>
+          ) : (
+            <div className="p-8 bg-white border border-dashed rounded-xl text-center text-gray-500">
+               Belum ada kelas. Gabung sekarang!
+            </div>
+          )}
+        </div>
+
+        {/* KOLOM KANAN (UPDATE TERBARU) - Lebar 1/3 */}
+        <div className="space-y-6">
+           <div className="flex items-center gap-3">
+              <Bell className="h-5 w-5 text-orange-500" />
+              <h2 className="text-xl font-bold text-gray-800">Pengumuman Terbaru</h2>
+           </div>
+
+           <div className="bg-white border rounded-xl shadow-sm p-2 min-h-[200px]">
+              {loadingUpdates ? (
+                <div className="text-center py-10 text-gray-400 text-sm">Memuat updates...</div>
+              ) : recentUpdates.length > 0 ? (
+                <div className="divide-y">
+                   {recentUpdates.map((update) => (
+                      <div 
+                        key={update.id} 
+                        className="p-4 hover:bg-gray-50 transition-colors cursor-pointer rounded-lg group"
+                        onClick={() => router.push(`/class/${update.classId}`)}
+                      >
+                         <div className="flex justify-between items-start mb-1">
+                            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                               {update.className}
+                            </span>
+                            <span className="text-[10px] text-gray-400">
+                               {formatDate(update.createdAt)}
+                            </span>
+                         </div>
+                         <p className="text-sm text-gray-700 line-clamp-2 leading-relaxed group-hover:text-gray-900">
+                            {update.content}
+                         </p>
+                      </div>
+                   ))}
+                </div>
+              ) : (
+                <div className="text-center py-10 text-gray-400 text-sm">
+                   Tidak ada pengumuman baru dari kelasmu.
+                </div>
+              )}
+           </div>
+        </div>
+
+      </div>
     </div>
   );
 }

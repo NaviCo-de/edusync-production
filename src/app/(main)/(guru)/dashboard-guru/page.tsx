@@ -84,8 +84,8 @@ export default function DashboardGuru() {
         teacherId: user.uid,
         teacherName: user.nama,
         code: code,
-        studentIds: [],
         studentCount: 0,
+        description: "Belum ada deskripsi kelas.",
         createdAt: serverTimestamp(),
       });
 
