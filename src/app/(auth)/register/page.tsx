@@ -71,22 +71,8 @@ export default function RegisterScreen() {
                 createdAt: new Date(),
             };
 
-            let roleSpecificData = {};
-
-            if (data.role === 'MURID') {
-                roleSpecificData = {
-                    enrolledClassIds: [],
-                    assignmentGrades: {}
-                };
-            } else if (data.role === 'GURU') {
-                roleSpecificData = {
-                    createdClassIds: [],
-                };
-            }
-
             await setDoc(doc(db, "users", user.uid), {
                 ...baseData,
-                ...roleSpecificData
             });
             console.log("Login Berhasil")
             router.push('/login')
