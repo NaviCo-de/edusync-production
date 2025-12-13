@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Search, Bell, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 // --- KOMPONEN KECIL UNTUK UI YANG BERSIH ---
 
@@ -17,7 +19,7 @@ const ScoreBox = ({ score }: { score: number | null }) => {
     </div>
   );
 
-  // Warna dinamis berdasarkan nilai (opsional)
+  // Warna dinamis berdasarkan nilai
   const isGood = score >= 75;
   
   return (
@@ -50,7 +52,7 @@ const GradeCard = ({ grade }: { grade: StudentGrade }) => {
             {grade.question}
           </h3>
           <p className="text-sm text-gray-500 mt-1">
-            Deadline on 18 Nov 2025 - 23:59 {/* Hardcoded dummy date krn tidak ada di API gradeService saat ini, nanti bisa ditambah */}
+            Deadline on 18 Nov 2025 - 23:59
           </p>
           
           {/* Preview Feedback (Muncul saat ditutup) */}
@@ -117,11 +119,11 @@ export default function MyGradesPage() {
   const [grades, setGrades] = useState<StudentGrade[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [activeFilter, setActiveFilter] = useState("Semua");
+  const [classNames, setClassNames] = useState<string[]>([]); // State untuk menyimpan nama kelas asli
+  
   const router = useRouter();
 
-  // Dummy Filters (Nanti bisa diambil dari DB jika perlu)
-  const filters = ["Semua", "Matematika Diskret", "Kalkulus 1", "Dasar-Dasar Pemrograman"];
-
+  // 1. Fetch Grade Data
   useEffect(() => {
     const fetchData = async () => {
       if (user?.uid) {
@@ -141,6 +143,79 @@ export default function MyGradesPage() {
     }
   }, [user, userLoading, router]);
 
+  // 2. Fetch Class Names from 'classes' collection based on user.daftarKelas IDs
+  useEffect(() => {
+    const fetchClassNames = async () => {
+      if (user?.daftarKelas && user.daftarKelas.length > 0) {
+        try {
+          // Ambil semua dokumen kelas secara paralel
+          const classPromises = user.daftarKelas.map(async (classId) => {
+            const classDocRef = doc(db, "classes", classId);
+            const classSnap = await getDoc(classDocRef);
+            if (classSnap.exists()) {
+              // Ambil field nama, sesuaikan dengan field di DB kamu (misal: 'nama', 'name', 'mata_kuliah')
+              const data = classSnap.data();
+              return data.nama || data.name || data.subject || "Kelas Tanpa Nama";
+            }
+            return "Unknown Class";
+          });
+
+          const names = await Promise.all(classPromises);
+          setClassNames(names);
+        } catch (error) {
+          console.error("Gagal mengambil data kelas:", error);
+        }
+      }
+    };
+
+    if (user) {
+      fetchClassNames();
+    }
+  }, [user]);
+
+  // Gabungkan "Semua" dengan nama kelas yang berhasil diambil
+  const filters = ["Semua", ...classNames];
+
+  // Logic Warna Berulang (Pattern 3 Warna) sesuai request
+  const getFilterStyle = (index: number, isActive: boolean) => {
+    // Pattern index (skip "Semua" di index 0 agar pola warna mulai dari kelas pertama)
+    const patternIndex = index - 1; 
+    
+    // Style khusus tombol "Semua"
+    if (index === 0) { 
+        return isActive 
+            ? "bg-gray-900 text-white shadow-md border-transparent" 
+            : "bg-white text-gray-600 hover:bg-gray-50 border border-transparent";
+    }
+
+    // Pola 3 Warna untuk Kelas (0, 1, 2, 0, 1, 2...)
+    const colorPattern = patternIndex % 3;
+
+    // Base styles
+    let style = "shadow-sm border-2 transition-all duration-200";
+
+    // 1. Putih Biru (Matematika Diskret style)
+    if (colorPattern === 0) {
+        style += isActive 
+            ? " bg-white text-blue-base border-blue-base" 
+            : " bg-white text-blue-base border-transparent hover:shadow-md";
+    }
+    // 2. Kuning Hitam (Kalkulus style)
+    else if (colorPattern === 1) {
+        style += isActive 
+            ? " bg-yellow-base text-black border-yellow-600" 
+            : " bg-yellow-base text-black border-transparent hover:shadow-md";
+    }
+    // 3. Ungu Putih (Pemrograman style)
+    else {
+        style += isActive 
+            ? " bg-[#8B5CF6] text-white border-[#7C3AED]" 
+            : " bg-[#8B5CF6] text-white border-transparent hover:shadow-md";
+    }
+    
+    return style;
+  };
+
   if (userLoading || loadingData) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-[#F8F9FC]">
@@ -152,46 +227,49 @@ export default function MyGradesPage() {
     );
   }
 
+  // Filter Logic Sederhana (Client Side)
+  const filteredGrades = activeFilter === "Semua" 
+    ? grades 
+    : grades; // Note: Filtering actual akan butuh field 'className' di grades, saat ini menampilkan semua.
+
   return (
-    <div className="min-h-screen bg-[#F8F9FC] w-full">
+    <div className="min-h-screen bg-[#F8F9FC] w-full pb-20">
       {/* 1. HEADER SECTION */}
-      <div className="px-6 md:px-12 pt-10 pb-6 bg-white md:bg-transparent">
+      <div className="px-6 md:px-12 pt-10 pb-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           
-          {/* Title */}
+          {/* Title dengan Gradasi & Hapus Subtitle Kecil */}
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold text-blue-base mb-2">
+            <h1 className="text-3xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-blue-400 via-blue-600 to-purple-600 bg-clip-text text-transparent leading-tight py-2">
               Let&rsquo;s See Your Progress Here!
             </h1>
-            <p className="text-gray-400 font-medium">Keep up the good work, {user?.nama?.split(' ')[0] || 'Student'}!</p>
           </div>
 
           {/* Search & Notif */}
           <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className="relative flex-1 md:w-[350px]">
+            {/* Search bar dipanjangkan (w-full pada mobile, fixed lebar pada desktop) */}
+            <div className="relative flex-1 md:w-[600px]">
               <Input 
                 placeholder="Cari Materi atau Tugas" 
-                className="pl-6 pr-10 py-6 rounded-full bg-white shadow-sm border-gray-100 text-sm"
+                className="pl-6 pr-10 py-6 rounded-full bg-white shadow-sm border-gray-100 text-sm w-full focus-visible:ring-blue-base transition-shadow focus:shadow-md"
               />
-              <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <Search className="absolute right-6 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
             </div>
-            <button className="w-12 h-12 bg-addition-blue-30 rounded-full flex items-center justify-center text-blue-base shrink-0 hover:bg-blue-100 transition">
+            <button className="w-12 h-12 bg-white border border-gray-100 rounded-full flex items-center justify-center text-blue-base shrink-0 hover:bg-blue-50 transition shadow-sm">
               <Bell className="w-6 h-6" />
             </button>
           </div>
         </div>
 
-        {/* 2. FILTER TABS */}
-        <div className="mt-8 flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-          {filters.map((filter) => (
+        {/* 2. FILTER TABS (Dynamic Colors dari DB) */}
+        <div className="mt-10 flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
+          {filters.map((filter, index) => (
             <button
-              key={filter}
+              key={`${filter}-${index}`}
               onClick={() => setActiveFilter(filter)}
               className={cn(
-                "px-6 py-3 rounded-xl font-bold text-sm whitespace-nowrap transition-all duration-200",
-                activeFilter === filter 
-                  ? "bg-yellow-base text-black shadow-md shadow-yellow-100" // Style Aktif (Kuning seperti di screenshot)
-                  : "bg-white text-blue-base hover:bg-blue-50 border border-transparent" // Style Inaktif
+                "px-6 py-3 rounded-xl font-bold text-sm whitespace-nowrap",
+                getFilterStyle(index, activeFilter === filter)
               )}
             >
               {filter}
@@ -201,13 +279,13 @@ export default function MyGradesPage() {
       </div>
 
       {/* 3. CONTENT LIST */}
-      <div className="px-6 md:px-12 py-6 space-y-5 max-w-7xl">
-        {grades.length === 0 ? (
+      <div className="px-6 md:px-12 py-2 space-y-5 max-w-7xl">
+        {filteredGrades.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-gray-400">Belum ada tugas yang dikumpulkan.</p>
           </div>
         ) : (
-          grades.map((grade) => (
+          filteredGrades.map((grade) => (
             <GradeCard key={grade.id} grade={grade} />
           ))
         )}
