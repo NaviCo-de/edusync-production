@@ -28,7 +28,7 @@ export default function Navbar() {
 
     return(
         // CONTAINER UTAMA (Desain persis: shadow, padding, margin)
-        <div className="flex items-center justify-between shadow-[0_0_20px_rgba(0,0,0,0.15)] bg-white px-20 py-9 mb-11 sticky top-0 z-50">
+        <div className="flex items-center justify-between shadow-[0_0_20px_rgba(0,0,0,0.15)] bg-white px-20 py-9 sticky top-0 z-50">
             
             {/* LOGO SECTION */}
             <div className="flex justify-center items-center gap-2">

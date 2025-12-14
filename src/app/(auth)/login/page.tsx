@@ -117,7 +117,7 @@ export default function LoginScreen() {
                                 )}
                             />
                             <div className="flex justify-between text-sh7 text-blue-50 font-semibold">
-                                <a href="">Forgot Password?</a>
+                                <a href="/forgot-password">Forgot Password?</a>
                                 <a href="/register">Create Account</a>
                             </div>
                         </div>

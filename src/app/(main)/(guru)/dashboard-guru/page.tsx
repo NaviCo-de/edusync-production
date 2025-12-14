@@ -118,15 +118,6 @@ export default function DashboardGuru() {
           <h1>Good Morning,</h1>
           <p>Prof. {user.nama}!</p>
         </div>
-        
-        {classes.length > 0 && (
-          <Button 
-            onClick={() => setOpen(true)} 
-            className="absolute right-0 top-1/2 -translate-y-1/2 hidden md:block" // Hidden di mobile biar gak nabrak
-          >
-            + Kelas Baru
-          </Button>
-        )}
       </header>
 
       {/* Dialog Create Class */}
@@ -151,62 +142,72 @@ export default function DashboardGuru() {
             <ClassImageUpload onUploadComplete={(url) => setClassImage(url)} />
           </div>
           <DialogFooter>
-            <Button onClick={handleCreateClass} disabled={isSubmitting}>
+            <Button 
+              onClick={handleCreateClass} 
+              disabled={isSubmitting}
+              className="rounded-[20px] px-5 py-4 text-b7 text-white font-semibold w-fit h-fit bg-blue-base"
+            >
               {isSubmitting ? "Menyimpan..." : "Simpan Kelas"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* GRID KELAS */}
-      {classes.length > 0 ? (
-        // [EDIT PENTING] logic grid disini: xl:grid-cols-4 (Layar besar = 4 kolom)
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full max-w-7xl">
-          {classes.map((cls) => (
-            <div 
-              key={cls.id} 
-              // [BARU] Fungsi klik pindah halaman
-              onClick={() => router.push(`/class/${cls.id}`)}
-              className="border rounded-xl p-5 shadow-sm hover:shadow-md transition-all bg-white group cursor-pointer relative overflow-hidden flex flex-col"
+      <div className='flex flex-col gap-10'>
+        <div className='flex justify-between items-center'>
+          <h1 className='text-sh3 font-semibold'>Kelas Anda</h1>
+          {classes.length > 0 && (
+            <Button 
+              onClick={() => setOpen(true)} 
+              className="rounded-[20px] px-8 py-4 text-b7 text-white font-semibold w-fit h-fit bg-blue-base"
             >
-              <div className="flex justify-between items-start mb-4">
-                <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-600 z-10">
-                  {cls.code}
-                </span>
-                {cls.imageUrl && (
-                  <img src={cls.imageUrl} alt="Logo" className="w-10 h-10 rounded-full object-cover border" />
-                )}
-              </div>
-              
-              <h3 className="text-lg font-bold text-gray-800 mb-1 group-hover:text-blue-600 transition-colors line-clamp-1">
-                {cls.name}
-              </h3>
-              
-              <p className="text-gray-500 text-xs line-clamp-2 mb-4 grow">
-                {cls.description || "Kelas aktif semester ini"}
-              </p>
-
-              <div className="flex items-center gap-2 text-gray-500 text-xs mt-auto pt-4 border-t">
-                <span>👥 {cls.studentCount || 0} Murid</span>
-              </div>
-            </div>
-          ))}
+              + Kelas Baru
+            </Button>
+          )}
         </div>
-      ) : (
-        // Tampilan Kosong (Empty State)
-        <div className="text-center mt-10">
-          <div className="w-24 h-24 bg-gray-50 rounded-full mx-auto flex items-center justify-center text-4xl mb-4">
-             📚
+        {/* GRID KELAS */}
+        {classes.length > 0 ? (
+          // [EDIT PENTING] logic grid disini: xl:grid-cols-4 (Layar besar = 4 kolom)
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full max-w-7xl">
+            {classes.map((cls) => (
+              <div 
+                key={cls.id} 
+                // [BARU] Fungsi klik pindah halaman
+                onClick={() => router.push(`/class/${cls.id}`)}
+                className="rounded-[12px] px-7 py-8 shadow-sm hover:shadow-md hover:scale-105 transition-all bg-white group cursor-pointer relative overflow-hidden flex flex-col gap-9"
+              >
+                <h3 className="text-sh3 font-semibold text-blue-base transition-colors line-clamp-1">
+                  {cls.name}
+                </h3>
+                <div className="flex justify-center items-center mb-4">
+                  {cls.imageUrl && (
+                    <img src={cls.imageUrl} alt="Logo" className="w-20 h-20 rounded-[12px] object-cover border" />
+                  )}
+                </div>
+                
+              </div>
+            ))}
           </div>
-          <h3 className="text-xl font-semibold text-gray-800">Belum ada kelas</h3>
-          <p className="text-gray-500 max-w-sm mt-2 mb-6 mx-auto">
-            Mulai mengajar dengan membuat kelas pertama Anda.
-          </p>
-          <Button onClick={() => setOpen(true)} variant="default">
-            Buat Kelas Sekarang
-          </Button>
-        </div>
-      )}
+        ) : (
+          // Tampilan Kosong (Empty State)
+          <div className="text-center mt-10 border-2 border-dashed rounded-[20px] w-full py-4">
+            <div className="w-24 h-24 bg-gray-50 rounded-full mx-auto flex items-center justify-center text-4xl">
+              📚
+            </div>
+            <h3 className="text-xl font-semibold text-gray-800">Belum ada kelas</h3>
+            <p className="text-gray-500 max-w-sm mt-2 mb-6 mx-auto">
+              Mulai mengajar dengan membuat kelas pertama Anda.
+            </p>
+            <Button 
+              onClick={() => setOpen(true)} 
+              variant="default"
+              className="rounded-[20px] px-8 py-4 text-b7 text-white font-semibold w-fit h-fit bg-blue-base"
+            >
+              Buat Kelas Sekarang
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -10,14 +10,17 @@ import {
   where, 
   getDocs, 
   doc, 
-  getDoc, // [PENTING] Untuk ambil nama kelas
+  getDoc, 
   updateDoc, 
   arrayUnion, 
   setDoc,
   serverTimestamp,
-  orderBy, // [PENTING] Untuk urutkan pengumuman
-  limit // [PENTING] Cuma ambil 1 per kelas
+  orderBy, 
+  limit 
 } from "firebase/firestore";
+
+// Services
+import { getStudentAssignments, categorizeAssignments, Assignment } from "@/lib/services/assignmentService";
 
 // UI Components
 import { Button } from "@/components/ui/button";
@@ -32,21 +35,20 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Loader2, BookOpen, Bell } from "lucide-react";
-
-// Import Sonner & Components
+import { Plus, Loader2, BookOpen, Bell, ClipboardList, CheckCircle, Clock } from "lucide-react";
 import { toast } from "sonner"; 
 import { ClassCard } from "../components/ClassCard";
-import { format } from "date-fns"; // [OPSIONAL] Install date-fns kalau belum: npm i date-fns
-import { id as ind } from "date-fns/locale"; // Locale Indonesia
+import { AssignmentCard } from "../components/AssignmentCard";
+import { format } from "date-fns"; 
+import { id as ind } from "date-fns/locale";
+import { cn } from "@/lib/utils";
 
-// Interface untuk data gabungan Pengumuman + Info Kelas
 interface DashboardAnnouncement {
   id: string;
   content: string;
   createdAt: any;
   classId: string;
-  className: string; // Nama kelasnya (misal: Matematika X)
+  className: string;
 }
 
 export default function DashboardMurid() {
@@ -58,35 +60,42 @@ export default function DashboardMurid() {
   const [inputCode, setInputCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
 
-  // [BARU] State untuk Pengumuman Dashboard
+  // State Pengumuman
   const [recentUpdates, setRecentUpdates] = useState<DashboardAnnouncement[]>([]);
   const [loadingUpdates, setLoadingUpdates] = useState(true);
 
-  // --- 1. FETCH PENGUMUMAN TERBARU (DARI SEMUA KELAS) ---
+  // 🔥 NEW: State Assignments
+  const [assignments, setAssignments] = useState<{
+    ongoing: Assignment[];
+    submitted: Assignment[];
+    graded: Assignment[];
+  }>({ ongoing: [], submitted: [], graded: [] });
+  const [loadingAssignments, setLoadingAssignments] = useState(true);
+
+  // 🔥 NEW: Active Tab untuk Assignment Section
+  const [activeTab, setActiveTab] = useState<'ongoing' | 'submitted' | 'graded'>('ongoing');
+
+  // --- FETCH PENGUMUMAN (EXISTING) ---
   useEffect(() => {
     const fetchRecentUpdates = async () => {
-      // Tunggu user & daftarKelas siap
       if (!user || !user.daftarKelas || user.daftarKelas.length === 0) {
         setLoadingUpdates(false);
         return;
       }
 
       try {
-        // Kita fetch secara paralel untuk semua kelas yang diikuti
         const promises = user.daftarKelas.map(async (classId) => {
-          // A. Ambil Info Kelas (Kita butuh Namanya)
           const classRef = doc(db, "classes", classId);
           const classSnap = await getDoc(classRef);
           
-          if (!classSnap.exists()) return null; // Skip kalau kelas udah dihapus
+          if (!classSnap.exists()) return null;
           const className = classSnap.data().name || "Kelas Tanpa Nama";
 
-          // B. Ambil 1 Pengumuman Terbaru dari sub-collection
           const announcementsRef = collection(db, "classes", classId, "announcements");
           const q = query(announcementsRef, orderBy("createdAt", "desc"), limit(1));
           const annSnap = await getDocs(q);
 
-          if (annSnap.empty) return null; // Skip kalau gak ada pengumuman
+          if (annSnap.empty) return null;
 
           const annData = annSnap.docs[0].data();
           
@@ -99,16 +108,14 @@ export default function DashboardMurid() {
           } as DashboardAnnouncement;
         });
 
-        // Tunggu semua selesai
         const results = await Promise.all(promises);
 
-        // Filter yang null (kelas tanpa pengumuman) & Urutkan global by date
         const validResults = results
           .filter((item): item is DashboardAnnouncement => item !== null)
           .sort((a, b) => {
              const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
              const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
-             return dateB.getTime() - dateA.getTime(); // Descending (Terbaru di atas)
+             return dateB.getTime() - dateA.getTime();
           });
 
         setRecentUpdates(validResults);
@@ -121,10 +128,32 @@ export default function DashboardMurid() {
     };
 
     fetchRecentUpdates();
-  }, [user]); // Jalan ulang kalau user berubah
+  }, [user]);
 
+  // 🔥 NEW: FETCH ASSIGNMENTS
+  useEffect(() => {
+    const fetchAssignments = async () => {
+      if (!user || !user.daftarKelas || user.daftarKelas.length === 0) {
+        setLoadingAssignments(false);
+        return;
+      }
 
-  // --- 2. LOGIC GABUNG KELAS (TETAP SAMA) ---
+      setLoadingAssignments(true);
+      try {
+        const allAssignments = await getStudentAssignments(user.uid, user.daftarKelas);
+        const categorized = categorizeAssignments(allAssignments);
+        setAssignments(categorized);
+      } catch (err) {
+        console.error("Error fetching assignments:", err);
+      } finally {
+        setLoadingAssignments(false);
+      }
+    };
+
+    fetchAssignments();
+  }, [user]);
+
+  // --- JOIN CLASS LOGIC (EXISTING) ---
   const handleJoinClass = async () => {
     if (!inputCode) return;
     setIsJoining(true);
@@ -176,19 +205,23 @@ export default function DashboardMurid() {
     }
   };
 
-  // --- HELPER DATE FORMAT ---
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "";
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    // Kalau belum install date-fns, pakai: return date.toLocaleDateString();
     return format(date, "d MMM, HH:mm", { locale: ind }); 
   };
-
 
   // --- RENDER ---
   if (loading) return <div className="p-10 text-center">Memuat data murid...</div>;
   if (error) return <div className="p-10 text-red-500 font-bold text-center">{error}</div>;
   if (!user) return <div className="p-10 text-center">Sesi habis. Silakan login kembali.</div>;
+
+  // Data untuk Tab Badges
+  const tabData = {
+    ongoing: { count: assignments.ongoing.length, icon: Clock, color: "yellow" },
+    submitted: { count: assignments.submitted.length, icon: ClipboardList, color: "blue" },
+    graded: { count: assignments.graded.length, icon: CheckCircle, color: "green" },
+  };
 
   return (
     <div className="px-6 md:px-20 py-10 min-h-screen bg-gray-50/50">
@@ -238,9 +271,71 @@ export default function DashboardMurid() {
         </Dialog>
       </header>
 
+      {/* 🔥 NEW: ASSIGNMENTS SECTION */}
+      <div className="mb-10">
+        {/* TAB NAVIGATION */}
+        <div className="flex gap-6 mb-6 border-b-2 border-gray-200">
+          {(Object.keys(tabData) as Array<keyof typeof tabData>).map((tab) => {
+            const { count } = tabData[tab];
+            const isActive = activeTab === tab;
+            
+            const labelMap = {
+              ongoing: "On Going",
+              submitted: "Submitted", 
+              graded: "Graded"
+            };
+
+            return (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "pb-3 px-2 font-bold text-base transition-all relative",
+                  isActive 
+                    ? "text-blue-600 border-b-4 border-blue-600 -mb-0.5" 
+                    : "text-gray-500 hover:text-gray-700"
+                )}
+              >
+                {labelMap[tab]}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ASSIGNMENT CARDS */}
+        {loadingAssignments ? (
+          <div className="text-center py-10 text-gray-400">
+            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+            <p className="text-sm">Memuat tugas...</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {assignments[activeTab].length > 0 ? (
+              assignments[activeTab].map((assignment) => (
+                <AssignmentCard 
+                  key={assignment.id} 
+                  assignment={assignment} 
+                  variant={activeTab}
+                />
+              ))
+            ) : (
+              <div className="text-center py-16 bg-white border border-dashed rounded-xl">
+                <ClipboardList className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500 text-lg font-medium">
+                  {activeTab === 'ongoing' && "Tidak ada tugas aktif saat ini"}
+                  {activeTab === 'submitted' && "Belum ada tugas yang disubmit"}
+                  {activeTab === 'graded' && "Belum ada tugas yang dinilai"}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* EXISTING SECTIONS (Kelas & Pengumuman) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* KOLOM KIRI (LIST KELAS) - Lebar 2/3 */}
+        {/* KOLOM KIRI (LIST KELAS) */}
         <div className="lg:col-span-2 space-y-6">
           <div className="flex items-center gap-3">
               <BookOpen className="h-5 w-5 text-blue-600" />
@@ -260,7 +355,7 @@ export default function DashboardMurid() {
           )}
         </div>
 
-        {/* KOLOM KANAN (UPDATE TERBARU) - Lebar 1/3 */}
+        {/* KOLOM KANAN (UPDATE TERBARU) */}
         <div className="space-y-6">
            <div className="flex items-center gap-3">
               <Bell className="h-5 w-5 text-orange-500" />
