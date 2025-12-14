@@ -19,9 +19,6 @@ import {
   limit 
 } from "firebase/firestore";
 
-// Services
-import { getStudentAssignments, categorizeAssignments, Assignment } from "@/lib/services/assignmentService";
-
 // UI Components
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,13 +32,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Loader2, BookOpen, Bell, ClipboardList, CheckCircle, Clock } from "lucide-react";
+import { Plus, Loader2, ChevronRight } from "lucide-react";
 import { toast } from "sonner"; 
-import { ClassCard } from "../components/ClassCard";
-import { AssignmentCard } from "../components/AssignmentCard";
-import { format } from "date-fns"; 
+import { format, isSameDay, parseISO, isAfter, isBefore } from "date-fns"; 
 import { id as ind } from "date-fns/locale";
+import { Calendar } from "@/components/ui/calendar"; 
 import { cn } from "@/lib/utils";
+
+// [PENTING] Import Type Assignment dari AssignmentCard yang baru kita perbaiki
+import { AssignmentCard, Assignment } from "../components/AssignmentCard";
 
 interface DashboardAnnouncement {
   id: string;
@@ -49,6 +48,7 @@ interface DashboardAnnouncement {
   createdAt: any;
   classId: string;
   className: string;
+  teacherName: string;
 }
 
 export default function DashboardMurid() {
@@ -64,18 +64,20 @@ export default function DashboardMurid() {
   const [recentUpdates, setRecentUpdates] = useState<DashboardAnnouncement[]>([]);
   const [loadingUpdates, setLoadingUpdates] = useState(true);
 
-  // 🔥 NEW: State Assignments
+  // State Assignments
   const [assignments, setAssignments] = useState<{
     ongoing: Assignment[];
-    submitted: Assignment[];
+    submitted: Assignment[]; 
     graded: Assignment[];
   }>({ ongoing: [], submitted: [], graded: [] });
+  
   const [loadingAssignments, setLoadingAssignments] = useState(true);
 
-  // 🔥 NEW: Active Tab untuk Assignment Section
-  const [activeTab, setActiveTab] = useState<'ongoing' | 'submitted' | 'graded'>('ongoing');
+  // State Calendar
+  const [date, setDate] = useState<Date | undefined>(new Date());
+  const [highlightedDates, setHighlightedDates] = useState<Date[]>([]);
 
-  // --- FETCH PENGUMUMAN (EXISTING) ---
+  // --- 1. FETCH GLOBAL ANNOUNCEMENTS ---
   useEffect(() => {
     const fetchRecentUpdates = async () => {
       if (!user || !user.daftarKelas || user.daftarKelas.length === 0) {
@@ -84,42 +86,43 @@ export default function DashboardMurid() {
       }
 
       try {
-        const promises = user.daftarKelas.map(async (classId) => {
+        const promises = user.daftarKelas.map(async (classId: string) => {
           const classRef = doc(db, "classes", classId);
           const classSnap = await getDoc(classRef);
           
-          if (!classSnap.exists()) return null;
-          const className = classSnap.data().name || "Kelas Tanpa Nama";
+          if (!classSnap.exists()) return [];
+          const classData = classSnap.data();
+          const className = classData.name || "Kelas Tanpa Nama";
+          const teacherName = classData.teacherName || "Guru";
 
           const announcementsRef = collection(db, "classes", classId, "announcements");
-          const q = query(announcementsRef, orderBy("createdAt", "desc"), limit(1));
+          const q = query(announcementsRef, orderBy("createdAt", "desc"), limit(5));
           const annSnap = await getDocs(q);
 
-          if (annSnap.empty) return null;
+          if (annSnap.empty) return [];
 
-          const annData = annSnap.docs[0].data();
-          
-          return {
-            id: annSnap.docs[0].id,
-            content: annData.content,
-            createdAt: annData.createdAt,
-            classId: classId,
-            className: className,
-          } as DashboardAnnouncement;
+          return annSnap.docs.map(doc => {
+             const data = doc.data();
+             return {
+                id: doc.id,
+                content: data.content,
+                createdAt: data.createdAt,
+                classId: classId,
+                className: className,
+                teacherName: teacherName
+             } as DashboardAnnouncement;
+          });
         });
 
         const results = await Promise.all(promises);
-
-        const validResults = results
-          .filter((item): item is DashboardAnnouncement => item !== null)
-          .sort((a, b) => {
+        const allAnnouncements = results.flat();
+        const sorted = allAnnouncements.sort((a, b) => {
              const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
              const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
              return dateB.getTime() - dateA.getTime();
-          });
+        });
 
-        setRecentUpdates(validResults);
-
+        setRecentUpdates(sorted.slice(0, 3));
       } catch (err) {
         console.error("Gagal fetch updates:", err);
       } finally {
@@ -130,7 +133,7 @@ export default function DashboardMurid() {
     fetchRecentUpdates();
   }, [user]);
 
-  // 🔥 NEW: FETCH ASSIGNMENTS
+  // --- 2. FETCH ASSIGNMENTS (LOGIC FIX) ---
   useEffect(() => {
     const fetchAssignments = async () => {
       if (!user || !user.daftarKelas || user.daftarKelas.length === 0) {
@@ -140,9 +143,69 @@ export default function DashboardMurid() {
 
       setLoadingAssignments(true);
       try {
-        const allAssignments = await getStudentAssignments(user.uid, user.daftarKelas);
-        const categorized = categorizeAssignments(allAssignments);
-        setAssignments(categorized);
+        const promises = user.daftarKelas.map(async (classId: string) => {
+            // 1. Info Kelas
+            const classDoc = await getDoc(doc(db, "classes", classId));
+            const className = classDoc.data()?.name || "Kelas";
+            const teacherName = classDoc.data()?.teacherName || "Guru";
+
+            // 2. Fetch Chapters
+            const chaptersRef = collection(db, "classes", classId, "chapters");
+            const chaptersSnap = await getDocs(chaptersRef);
+
+            let classTasks: Assignment[] = [];
+
+            chaptersSnap.forEach((chapDoc) => {
+                const chapData = chapDoc.data();
+                const subchapters = chapData.subchapters || [];
+                
+                subchapters.forEach((sub: any) => {
+                    const tasks = sub.assignments || [];
+                    tasks.forEach((task: any) => {
+                        if (task.status === 'published') {
+                            // [MAPPING DATA SESUAI ASSIGNMENT CARD BARU]
+                            classTasks.push({
+                                id: task.id,
+                                title: task.title,
+                                description: task.description,
+                                deadline: task.deadline, // Pakai 'deadline'
+                                status: task.status,
+                                createdAt: task.publishedAt || task.createdAt, // Tanggal publish
+                                
+                                classId: classId,
+                                className: className,
+                                teacherName: teacherName,
+                                
+                                // Placeholder untuk submission (nanti fetch dari submissions collection)
+                                submissionStatus: 'ongoing', 
+                            });
+                        }
+                    });
+                });
+            });
+
+            return classTasks;
+        });
+
+        const results = await Promise.all(promises);
+        const allAssignments = results.flat();
+
+        // 3. Sorting & Grouping
+        const now = new Date();
+        const ongoing = allAssignments.filter(a => a.deadline && isAfter(parseISO(a.deadline), now));
+        const past = allAssignments.filter(a => a.deadline && isBefore(parseISO(a.deadline), now));
+
+        // Untuk sementara Past Assignments masuk ke History/Graded biar UI gak kosong
+        setAssignments({
+            ongoing: ongoing,
+            submitted: [], 
+            graded: past   
+        });
+
+        // 4. Highlight Calendar
+        const dates = ongoing.map(a => parseISO(a.deadline!));
+        setHighlightedDates(dates);
+
       } catch (err) {
         console.error("Error fetching assignments:", err);
       } finally {
@@ -153,7 +216,7 @@ export default function DashboardMurid() {
     fetchAssignments();
   }, [user]);
 
-  // --- JOIN CLASS LOGIC (EXISTING) ---
+  // --- JOIN CLASS LOGIC ---
   const handleJoinClass = async () => {
     if (!inputCode) return;
     setIsJoining(true);
@@ -164,7 +227,7 @@ export default function DashboardMurid() {
       const querySnapshot = await getDocs(q);
 
       if (querySnapshot.empty) {
-        toast.error("Kelas tidak ditemukan", { description: "Kode kelas salah." });
+        toast.error("Kelas tidak ditemukan");
         setIsJoining(false);
         return;
       }
@@ -174,7 +237,7 @@ export default function DashboardMurid() {
       const classData = classDoc.data();
 
       if (user?.daftarKelas?.includes(classId)) {
-        toast.warning("Sudah Bergabung", { description: "Kamu sudah terdaftar." });
+        toast.warning("Sudah Bergabung");
         setIsJoining(false);
         return;
       }
@@ -194,7 +257,7 @@ export default function DashboardMurid() {
 
       setOpen(false);
       setInputCode("");
-      toast.success("Berhasil Bergabung!", { description: `Kelas ${classData.name}` });
+      toast.success(`Berhasil bergabung ke ${classData.name}`);
       window.location.reload(); 
 
     } catch (err) {
@@ -208,40 +271,44 @@ export default function DashboardMurid() {
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "";
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return format(date, "d MMM, HH:mm", { locale: ind }); 
+    return format(date, "d MMM yyyy - HH:mm", { locale: ind }); 
   };
 
-  // --- RENDER ---
+  // Logic Calendar Reminder
+  const getRemindersForSelectedDate = () => {
+    if (!date) return [];
+    const all = [...assignments.ongoing, ...assignments.graded];
+    return all.filter(task => {
+        if (!task.deadline) return false;
+        try {
+          const taskDate = parseISO(task.deadline);
+          return isSameDay(taskDate, date);
+        } catch(e) { return false; }
+    });
+  };
+
+  const selectedReminders = getRemindersForSelectedDate();
+
   if (loading) return <div className="p-10 text-center">Memuat data murid...</div>;
   if (error) return <div className="p-10 text-red-500 font-bold text-center">{error}</div>;
   if (!user) return <div className="p-10 text-center">Sesi habis. Silakan login kembali.</div>;
 
-  // Data untuk Tab Badges
-  const tabData = {
-    ongoing: { count: assignments.ongoing.length, icon: Clock, color: "yellow" },
-    submitted: { count: assignments.submitted.length, icon: ClipboardList, color: "blue" },
-    graded: { count: assignments.graded.length, icon: CheckCircle, color: "green" },
-  };
-
   return (
-    <div className="px-6 md:px-20 py-10 min-h-screen bg-gray-50/50">
+    <div className="px-6 md:px-12 py-10 min-h-screen bg-gray-50/50">
       
       {/* HEADER */}
       <header className="mb-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-            <h1 className="text-3xl font-bold bg-linear-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent w-fit">
-                Halo, {user.nama}!
+            <h1 className="text-3xl font-bold text-blue-600 w-fit">
+                Welcome Again, {user.nama.split(" ")[0]}!
             </h1>
-            <p className="text-gray-500 mt-1">
-                Selamat datang kembali.
-            </p>
         </div>
 
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition-transform active:scale-95">
+            <Button className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition-transform active:scale-95 rounded-full px-6">
               <Plus className="mr-2 h-4 w-4" />
-              Gabung Kelas
+              Join New Class
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
@@ -271,128 +338,166 @@ export default function DashboardMurid() {
         </Dialog>
       </header>
 
-      {/* 🔥 NEW: ASSIGNMENTS SECTION */}
-      <div className="mb-10">
-        {/* TAB NAVIGATION */}
-        <div className="flex gap-6 mb-6 border-b-2 border-gray-200">
-          {(Object.keys(tabData) as Array<keyof typeof tabData>).map((tab) => {
-            const { count } = tabData[tab];
-            const isActive = activeTab === tab;
-            
-            const labelMap = {
-              ongoing: "On Going",
-              submitted: "Submitted", 
-              graded: "Graded"
-            };
-
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "pb-3 px-2 font-bold text-base transition-all relative",
-                  isActive 
-                    ? "text-blue-600 border-b-4 border-blue-600 -mb-0.5" 
-                    : "text-gray-500 hover:text-gray-700"
-                )}
-              >
-                {labelMap[tab]}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* ASSIGNMENT CARDS */}
-        {loadingAssignments ? (
-          <div className="text-center py-10 text-gray-400">
-            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
-            <p className="text-sm">Memuat tugas...</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {assignments[activeTab].length > 0 ? (
-              assignments[activeTab].map((assignment) => (
-                <AssignmentCard 
-                  key={assignment.id} 
-                  assignment={assignment} 
-                  variant={activeTab}
-                />
-              ))
-            ) : (
-              <div className="text-center py-16 bg-white border border-dashed rounded-xl">
-                <ClipboardList className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500 text-lg font-medium">
-                  {activeTab === 'ongoing' && "Tidak ada tugas aktif saat ini"}
-                  {activeTab === 'submitted' && "Belum ada tugas yang disubmit"}
-                  {activeTab === 'graded' && "Belum ada tugas yang dinilai"}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* EXISTING SECTIONS (Kelas & Pengumuman) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         
-        {/* KOLOM KIRI (LIST KELAS) */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="flex items-center gap-3">
-              <BookOpen className="h-5 w-5 text-blue-600" />
-              <h2 className="text-xl font-bold text-gray-800">Kelas Saya</h2>
-          </div>
-          
-          {user.daftarKelas && user.daftarKelas.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-               {user.daftarKelas.map((classId: string) => (
-                  <ClassCard key={classId} classId={classId} />
-               ))}
+        {/* --- KOLOM KIRI (CONTENT UTAMA) --- */}
+        <div className="lg:col-span-3 space-y-10">
+            
+            {/* 1. LATEST ANNOUNCEMENT */}
+            <div>
+                <h2 className="text-2xl font-bold text-black mb-6">Latest Announcement</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    {loadingUpdates ? (
+                         <div className="col-span-3 text-center py-10 text-gray-400">Loading updates...</div>
+                    ) : recentUpdates.length > 0 ? (
+                        recentUpdates.map((announcement) => (
+                            <div key={announcement.id} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col h-full">
+                                <h3 className="font-bold text-lg text-gray-800 mb-1 line-clamp-1">{announcement.className}</h3>
+                                <p className="text-xs text-gray-500 mb-4">
+                                    By <span className="text-blue-600 font-medium">{announcement.teacherName}</span> | {formatDate(announcement.createdAt)}
+                                </p>
+                                <p className="text-gray-600 text-sm line-clamp-4 flex-grow mb-4">
+                                    {announcement.content}
+                                </p>
+                                <Button 
+                                    onClick={() => router.push(`/class/${announcement.classId}`)}
+                                    className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-semibold rounded-lg mt-auto"
+                                >
+                                    Lihat Selengkapnya
+                                </Button>
+                            </div>
+                        ))
+                    ) : (
+                        <div className="col-span-3 p-8 bg-white border border-dashed rounded-xl text-center text-gray-500">
+                           Tidak ada pengumuman terbaru.
+                        </div>
+                    )}
+                </div>
             </div>
-          ) : (
-            <div className="p-8 bg-white border border-dashed rounded-xl text-center text-gray-500">
-               Belum ada kelas. Gabung sekarang!
+
+            {/* 2. LATEST ASSIGNMENT (3 COLUMNS GRID) */}
+            <div>
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold text-black">Latest Assignment</h2>
+                    <Button variant="ghost" className="text-yellow-500 hover:text-yellow-600 hover:bg-transparent font-semibold">
+                        Lihat Selengkapnya
+                    </Button>
+                </div>
+                
+                {loadingAssignments ? (
+                    <div className="text-center py-10"><Loader2 className="w-8 h-8 animate-spin mx-auto text-blue-600"/></div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        
+                        {/* COLUMN 1: ON GOING */}
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-blue-600 text-center mb-2">On Going</h3>
+                            {assignments.ongoing.length > 0 ? assignments.ongoing.slice(0, 3).map(task => (
+                                <AssignmentCard key={task.id} assignment={task} variant="ongoing" />
+                            )) : (
+                                <div className="text-center p-4 bg-white rounded-xl border border-dashed text-gray-400 text-sm">No ongoing tasks</div>
+                            )}
+                        </div>
+
+                        {/* COLUMN 2: GRADED / HISTORY */}
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-blue-600 text-center mb-2">History (Past Due)</h3>
+                             {assignments.graded.length > 0 ? assignments.graded.slice(0, 3).map(task => (
+                                <AssignmentCard key={task.id} assignment={task} variant="graded" />
+                            )) : (
+                                <div className="text-center p-4 bg-white rounded-xl border border-dashed text-gray-400 text-sm">No past tasks</div>
+                            )}
+                        </div>
+
+                        {/* COLUMN 3: SUBMITTED */}
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-blue-600 text-center mb-2">Submitted</h3>
+                             {assignments.submitted.length > 0 ? assignments.submitted.slice(0, 3).map(task => (
+                                <AssignmentCard key={task.id} assignment={task} variant="submitted" />
+                            )) : (
+                                <div className="text-center p-4 bg-white rounded-xl border border-dashed text-gray-400 text-sm">
+                                    No submitted data yet
+                                </div>
+                            )}
+                        </div>
+
+                    </div>
+                )}
             </div>
-          )}
+
         </div>
 
-        {/* KOLOM KANAN (UPDATE TERBARU) */}
-        <div className="space-y-6">
-           <div className="flex items-center gap-3">
-              <Bell className="h-5 w-5 text-orange-500" />
-              <h2 className="text-xl font-bold text-gray-800">Pengumuman Terbaru</h2>
-           </div>
+        {/* --- KOLOM KANAN (CALENDAR & REMINDER) --- */}
+        <div className="lg:col-span-1 space-y-8">
+            
+            {/* CALENDAR */}
+            <div className="flex justify-center">
+                 <Calendar
+                    mode="single"
+                    selected={date}
+                    onSelect={setDate}
+                    className="rounded-md border-none bg-transparent"
+                    classNames={{
+                        head_cell: "text-gray-500 font-medium text-sm w-9",
+                        day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100 hover:bg-gray-100 rounded-full",
+                        day_selected: "bg-black text-white hover:bg-black hover:text-white focus:bg-black focus:text-white rounded-full",
+                        day_today: "bg-gray-100 text-gray-900 font-bold",
+                    }}
+                    modifiers={{
+                        hasDeadline: highlightedDates
+                    }}
+                    modifiersStyles={{
+                        hasDeadline: {
+                            color: "#2563EB", 
+                            fontWeight: "bold",
+                            backgroundColor: "#DBEAFE", 
+                            borderRadius: "100%"
+                        }
+                    }}
+                />
+            </div>
 
-           <div className="bg-white border rounded-xl shadow-sm p-2 min-h-[200px]">
-              {loadingUpdates ? (
-                <div className="text-center py-10 text-gray-400 text-sm">Memuat updates...</div>
-              ) : recentUpdates.length > 0 ? (
-                <div className="divide-y">
-                   {recentUpdates.map((update) => (
-                      <div 
-                        key={update.id} 
-                        className="p-4 hover:bg-gray-50 transition-colors cursor-pointer rounded-lg group"
-                        onClick={() => router.push(`/class/${update.classId}`)}
-                      >
-                         <div className="flex justify-between items-start mb-1">
-                            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                               {update.className}
-                            </span>
-                            <span className="text-[10px] text-gray-400">
-                               {formatDate(update.createdAt)}
-                            </span>
-                         </div>
-                         <p className="text-sm text-gray-700 line-clamp-2 leading-relaxed group-hover:text-gray-900">
-                            {update.content}
-                         </p>
-                      </div>
-                   ))}
+            {/* REMINDER SECTION */}
+            <div>
+                <h3 className="text-xl font-bold mb-4">Reminder</h3>
+                
+                <div className="flex flex-col gap-3">
+                    {date ? (
+                        selectedReminders.length > 0 ? (
+                            selectedReminders.map(task => (
+                                <div 
+                                    key={task.id}
+                                    onClick={() => router.push(`/class/${task.classId}/activity`)} 
+                                    className="bg-blue-600 text-white p-4 rounded-xl flex justify-between items-center cursor-pointer hover:bg-blue-700 transition-colors shadow-md group"
+                                >
+                                    <div className="flex-1 overflow-hidden">
+                                        <p className="font-bold text-sm truncate">{task.title}</p>
+                                        <p className="text-xs text-blue-100 mt-1 truncate">
+                                            {task.className}
+                                        </p>
+                                        <p className="text-[10px] text-blue-200 mt-0.5">
+                                            Due: {task.deadline ? format(parseISO(task.deadline), "HH:mm") : "-"}
+                                        </p>
+                                    </div>
+                                    <div className="bg-white/20 p-1 rounded-full group-hover:bg-white/30 ml-2 shrink-0">
+                                        <ChevronRight className="w-5 h-5 text-white" />
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                           <div className="p-6 bg-white rounded-xl text-center border border-gray-100 shadow-sm">
+                                <p className="text-gray-500 font-medium">Tidak ada deadline di tanggal ini.</p>
+                                <p className="text-xs text-gray-400 mt-1">{format(date, "d MMMM yyyy", {locale: ind})}</p>
+                           </div> 
+                        )
+                    ) : (
+                        <div className="p-6 bg-white rounded-xl text-center border border-gray-100 shadow-sm">
+                            <p className="text-gray-500">Pilih tanggal untuk melihat tugas</p>
+                        </div>
+                    )}
                 </div>
-              ) : (
-                <div className="text-center py-10 text-gray-400 text-sm">
-                   Tidak ada pengumuman baru dari kelasmu.
-                </div>
-              )}
-           </div>
+            </div>
+
         </div>
 
       </div>
