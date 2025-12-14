@@ -513,7 +513,7 @@ export default function ClassDetail() {
                 ))
               ) : (
                  <div className="text-center py-10 border-2 border-dashed rounded-xl">
-                   <p className="text-gray-400 mb-2">Belum ada postingan materi atau tugas.</p>
+                   <p className="text-gray-400 mb-2">Belum ada pengumuman.</p>
                  </div>
               )}
         </div>

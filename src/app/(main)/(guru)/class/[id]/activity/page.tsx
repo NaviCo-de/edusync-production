@@ -1,5 +1,8 @@
 "use client";
 
+import { CustomIcon } from '@/components/ui/CustomIcon';
+import Link from 'next/link';
+import Image from 'next/image';
 import { v4 as uuidv4 } from 'uuid';
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -13,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Plus, FileText, Download } from "lucide-react";
+import { Plus, FileText, Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 // --- FIXED TYPES ---
@@ -66,6 +69,8 @@ export default function ClassActivityPage() {
   // TRACKING CONTEXT
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- FETCH DATA ---
   const fetchChapters = async () => {
@@ -124,6 +129,13 @@ export default function ClassActivityPage() {
   // --- SAVE HANDLER ---
   const handleSave = async () => {
     if (!inputTitle) return toast.error("Judul wajib diisi");
+    if (modalType === 'material') {
+        if (!selectedFile && !inputUrl.trim()) {
+            return toast.error("Wajib upload file atau isi URL Link!");
+        }
+    }
+
+    setIsSubmitting(true);
 
     try {
       // CASE 1: NEW CHAPTER
@@ -210,6 +222,8 @@ export default function ClassActivityPage() {
     } catch (error) {
       console.error("Save error:", error);
       toast.error("Terjadi kesalahan saat menyimpan");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -240,48 +254,70 @@ export default function ClassActivityPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-8 pb-20">
-      {/* HEADER */}
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-4xl font-bold text-blue-600">Classroom</h1>
-        <div className="flex gap-3">
-          <Button 
-            variant="outline"
-            onClick={() => setShowDraftOnly(!showDraftOnly)}
-            className={cn(
-              "border-2 font-semibold transition-all",
-              showDraftOnly 
-                ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700" 
-                : "bg-blue-100 text-blue-700 border-blue-200 hover:bg-blue-200"
-            )}
+    <div className="mx-20 mt-11 pb-20">
+      <div className="flex items-center justify-between mb-12">
+        <div className="flex justify-center items-center">
+          <p className="text-sh1 font-semibold 
+                        bg-linear-to-r from-blue-20 via-blue-40 to-blue-base
+                        bg-clip-text text-transparent"
           >
-            📄 My Draft {showDraftOnly && "✓"}
-          </Button>
-          <Button 
-            onClick={() => openModal('chapter')}
-            className="bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            New Chapter
-          </Button>
+            Activity
+          </p>
         </div>
-      </div>
-
-      {/* SEARCH BAR */}
-      <div className="mb-8">
-        <div className="relative">
-          <Input 
-            placeholder="Cari Materi atau Tugas"
-            className="w-full max-w-xl pl-4 pr-12 py-6 rounded-full border-gray-200 bg-white shadow-sm"
+        <div>
+          <Input
+            placeholder="Search Material"
+            className="w-157 h-14 px-5 py-4 rounded-4xl text-b7 placeholder:text-b7 font-normal bg-white shadow-[0_0_15px_rgba(0,0,0,0.10)]"
+            icon={<CustomIcon 
+              src={"/search.png"}
+              className="w-6 h-6"
+            />}
           />
-          <button className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
-            🔍
-          </button>
         </div>
       </div>
+      <div className='flex gap-5'>
+        <Button
+          onClick={() => setShowDraftOnly(!showDraftOnly)}
+          className={cn(
+              // 1. Class Dasar (Selalu dipakai)
+              'flex group px-6 py-3 rounded-[8px] h-12 transition-all border-2',
+              
+              // 2. Logic Pembeda (Ternary Operator)
+              showDraftOnly 
+                ? "bg-white border-blue-base" // JIKA AKTIF: Jadi Putih, Border Biru
+                : "bg-blue-base border-transparent hover:bg-blue-10" // JIKA MATI: Jadi Biru Full
+          )}>
+          <CustomIcon 
+            src={"/my_draft.png"}
+            className={cn(
+                'w-7 h-7 transition-colors', 
+                showDraftOnly 
+                  ? "bg-blue-base" // Icon jadi Biru (karena background tombol putih)
+                  : "bg-white group-hover:bg-blue-base" // Icon Putih
+            )}
+          />
+          <p className={cn(
+              'text-sh6 font-semibold ml-2 transition-colors',
+              showDraftOnly 
+                ? "text-blue-base" // Teks jadi Biru
+                : "text-white group-hover:text-blue-base" // Teks Putih
+          )}>
+            My Draft
+          </p>
+        </Button>
 
-      {/* CHAPTERS LIST */}
-      <div className="space-y-6">
+        <Button
+          onClick={() => openModal('chapter')}
+          className='flex group bg-blue-base px-6 py-3 rounded-[8px] h-12 hover:bg-blue-10'
+        >
+          <CustomIcon 
+            src={"/plus.png"}
+            className='w-7 h-7 bg-white group-hover:bg-blue-base'
+          />
+          <p className='text-white text-sh6 font-semibold group-hover:text-blue-base'>New Chapter</p>
+        </Button>
+      </div>
+      <div>
         {chapters.map((chapter) => (
           <div key={chapter.id} className="overflow-hidden">
             
@@ -290,9 +326,9 @@ export default function ClassActivityPage() {
               <AccordionItem value={chapter.id} className="border-none">
                 
                 {/* CHAPTER TRIGGER - JUSTIFY BETWEEN */}
-                <div className="flex items-center justify-between px-6 py-4">
+                <div className="flex items-center justify-between py-4">
                   <AccordionTrigger className="hover:no-underline py-0 flex-none [&>svg]:hidden">
-                    <h2 className="text-xl font-bold text-blue-600 text-left">
+                    <h2 className="text-sh4 font-bold text-blue-base text-left hover:underline">
                       {chapter.title}
                     </h2>
                   </AccordionTrigger>
@@ -303,15 +339,18 @@ export default function ClassActivityPage() {
                       e.stopPropagation();
                       openModal('subchapter', chapter.id);
                     }}
-                    className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold px-4 py-2 rounded-lg"
+                    className="flex items-center group bg-yellow-base hover:scale-100 hover:bg-yellow-10 px-4 py-2 rounded-lg"
                   >
-                    <Plus className="w-4 h-4 mr-2" />
-                    New Sub Chapter
+                    <CustomIcon 
+                      src={"/plus.png"}
+                      className='w-6 h-6 bg-yellow-90 group-hover:bg-yellow-80'
+                    />
+                    <p className='text-b7 font-normal text-yellow-90 group-hover:text-yellow-80'>New Sub Chapter</p>
                   </Button>
                 </div>
 
                 {/* CHAPTER CONTENT (SUBCHAPTERS) */}
-                <AccordionContent className="px-6 pb-6 pt-0">
+                <AccordionContent className="pl-6 pb-6 pt-0">
                   <div className="space-y-4">
                     {chapter.subchapters?.map((sub) => (
                       <div key={sub.id} className="pl-6">
@@ -323,7 +362,7 @@ export default function ClassActivityPage() {
                             {/* SUBCHAPTER TRIGGER - JUSTIFY BETWEEN */}
                             <div className="flex items-center justify-between mb-2">
                               <AccordionTrigger className="hover:no-underline py-2 flex-none [&>svg]:hidden">
-                                <h3 className="text-lg font-semibold text-blue-600 text-left">
+                                <h3 className="text-sh5 font-semibold text-blue-base text-left hover:underline">
                                   {sub.title}
                                 </h3>
                               </AccordionTrigger>
@@ -335,62 +374,82 @@ export default function ClassActivityPage() {
                                     e.stopPropagation();
                                     goToAssignmentPage(chapter.id, sub.id);
                                   }}
-                                  className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold px-4 py-2 rounded-lg text-sm"
+                                  className="flex items-center group bg-yellow-base hover:scale-100 hover:bg-yellow-10 px-4 py-2 rounded-lg"
                                 >
-                                  <Plus className="w-3 h-3 mr-1" />
-                                  New Assignment
+                                  <CustomIcon 
+                                    src={"/plus.png"}
+                                    className='w-6 h-6 bg-yellow-90 group-hover:bg-yellow-80'
+                                  />
+                                  <p className='text-b7 font-normal text-yellow-90 group-hover:text-yellow-80'>New Assignment</p>
                                 </Button>
                                 <Button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     openModal('material', chapter.id, sub.id);
                                   }}
-                                  className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold px-4 py-2 rounded-lg text-sm"
+                                  className="flex items-center group bg-yellow-base hover:scale-100 hover:bg-yellow-10 px-4 py-2 rounded-lg"
                                 >
-                                  <Plus className="w-3 h-3 mr-1" />
-                                  New Material
+                                  <CustomIcon 
+                                    src={"/plus.png"}
+                                    className='w-6 h-6 bg-yellow-90 group-hover:bg-yellow-80'
+                                  />
+                                  <p className='text-b7 font-normal text-yellow-90 group-hover:text-yellow-80'>New Material</p>
                                 </Button>
                               </div>
                             </div>
 
                             {/* SUBCHAPTER CONTENT */}
-                            <AccordionContent className="pt-4 space-y-6">
-                              
+                            <AccordionContent className="pt-4 pl-6">
+                              <h4 className="text-sh6 font-semibold mb-3">Materi</h4>
                               {/* MATERI SECTION */}
-                              {sub.materials.length > 0 && (
-                                <div>
-                                  <h4 className="font-bold text-gray-900 mb-3">Materi</h4>
-                                  <div className="space-y-2">
+                              {sub.materials.length > 0 ? (
+                                <>
+                                  <div className="flex flex-col gap-3 mb-5">
                                     {sub.materials.map((mat) => (
                                       <div 
                                         key={mat.id}
-                                        className="flex items-center justify-between bg-gray-50 px-4 py-3 rounded-lg border border-gray-100 hover:bg-gray-100 transition-colors"
+                                        className="flex items-center justify-between bg-white px-4 py-3 rounded-sm hover:bg-[#E7E7E7] transition-colors"
                                       >
-                                        <div className="flex items-center gap-3">
-                                          <div className="w-10 h-10 bg-red-500 rounded flex items-center justify-center text-white font-bold">
-                                            📄
-                                          </div>
-                                          <span className="font-medium text-gray-900">
+                                        <div className="flex items-center gap-5">
+                                          <Image 
+                                            src={"/pdf.png"}
+                                            alt='pdf'
+                                            width={500}
+                                            height={500}
+                                            className='w-7 h-8'
+                                          />
+                                          <span className="text-b7 font-normal">
                                             {mat.title}
                                           </span>
                                         </div>
                                         
                                         <button
                                           onClick={() => handleDownload(mat.url, mat.title)}
-                                          className="text-gray-600 hover:text-blue-600 transition-colors"
                                         >
-                                          <Download className="w-5 h-5" />
+                                          <Image 
+                                            src={"/download.png"}
+                                            alt='download'
+                                            width={500}
+                                            height={500}
+                                            className='w-7 h-7'
+                                          />
                                         </button>
                                       </div>
                                     ))}
                                   </div>
-                                </div>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-gray-400 text-center py-8 text-b6">
+                                    Belum ada materi di sub chapter ini
+                                  </p>
+                                </>
                               )}
 
                               {/* TUGAS SECTION */}
-                              {sub.assignments.length > 0 && (
+                              <h4 className="text-sh6 font-semibold mb-3">Tugas</h4>
+                              {sub.assignments.length > 0 ? (
                                 <div>
-                                  <h4 className="font-bold text-gray-900 mb-3">Tugas</h4>
                                   <div className="space-y-2">
                                     {sub.assignments
                                       .filter((assignment: any) => {
@@ -404,24 +463,19 @@ export default function ClassActivityPage() {
                                         <div 
                                           key={assignment.id}
                                           className={cn(
-                                            "flex items-center justify-between px-4 py-3 rounded-lg border transition-all",
+                                            "flex items-center justify-between px-4 py-3 rounded-sm transition-all",
                                             assignment.status === 'draft'
-                                              ? "bg-gray-200 border-gray-300" // Draft: Darker
-                                              : "bg-gray-50 border-gray-100 hover:bg-gray-100" // Published: Lighter
+                                              ? "bg-[#E7E7E7]" // Draft: Darker
+                                              : "bg-white hover:bg-[#E7E7E7]" // Published: Lighter
                                           )}
                                         >
                                           <div>
                                             <div className="flex items-center gap-2">
-                                              <p className="font-bold text-gray-900">
+                                              <p className="text-sh6 font-semibold">
                                                 {assignment.title}
                                               </p>
-                                              {assignment.status === 'draft' && (
-                                                <span className="bg-gray-500 text-white text-xs px-2 py-0.5 rounded-full font-semibold">
-                                                  DRAFT
-                                                </span>
-                                              )}
                                             </div>
-                                            <p className="text-xs text-gray-500 mt-1">
+                                            <p className="text-sh7">
                                               {assignment.status === 'published' ? 'Published' : 'Created'} on {new Date(assignment.publishedAt).toLocaleDateString('en-GB', {
                                                 day: '2-digit',
                                                 month: 'short',
@@ -434,7 +488,7 @@ export default function ClassActivityPage() {
                                           
                                           <Button
                                             variant="ghost"
-                                            className="bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2"
+                                            className="bg-purple-base hover:bg-purple-10 text-white hover:text-purple-base text-b8 px-4 py-2"
                                           >
                                             See More
                                           </Button>
@@ -442,9 +496,14 @@ export default function ClassActivityPage() {
                                       ))}
                                   </div>
                                 </div>
+                              ) : (
+                                <>
+                                  <p className="text-gray-400 text-center py-8 text-b6">
+                                    Belum ada tugas di sub chapter ini
+                                  </p>
+                                </>
                               )}
 
-                              {/* EMPTY STATE */}
                               {sub.materials.length === 0 && sub.assignments.length === 0 && (
                                 <p className="text-gray-400 text-center py-8 text-sm">
                                   Belum ada materi atau tugas di sub chapter ini
@@ -470,54 +529,36 @@ export default function ClassActivityPage() {
             </Accordion>
           </div>
         ))}
-
-        {/* EMPTY CHAPTERS */}
-        {chapters.length === 0 && (
-          <div className="text-center py-20 bg-white rounded-xl border-2 border-dashed border-gray-200">
-            <p className="text-gray-400 text-lg mb-4">Belum ada chapter</p>
-            <Button onClick={() => openModal('chapter')} className="bg-blue-600 text-white">
-              <Plus className="w-4 h-4 mr-2" />
-              Buat Chapter Pertama
-            </Button>
-          </div>
-        )}
       </div>
-
       {/* MODAL */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-center text-xl">
-              {modalType === 'chapter' && 'Add New Chapter'}
-              {modalType === 'subchapter' && 'Add New Sub Chapter'}
-              {modalType === 'material' && 'Add New Material'}
-            </DialogTitle>
-            {modalType === 'subchapter' && selectedChapterId && (
-              <p className="text-center text-sm text-gray-500 mt-1">
-                in {chapters.find(c => c.id === selectedChapterId)?.title}
-              </p>
-            )}
-            {modalType === 'material' && selectedSubId && (
-              <p className="text-center text-sm text-gray-500 mt-1">
-                in {chapters
-                  .find(c => c.id === selectedChapterId)
-                  ?.subchapters.find(s => s.id === selectedSubId)?.title}
-              </p>
-            )}
-          </DialogHeader>
-
+        <div className='hidden'>
+          <DialogTitle></DialogTitle>
+        </div>
+        <DialogContent className=''>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>
-                {modalType === 'chapter' && "Chapter's Title"}
-                {modalType === 'subchapter' && "Sub Chapter's Title"}
-                {modalType === 'material' && "Material Title"}
-              </Label>
+              {modalType === 'chapter' && (<p className="text-center text-sh3 font-semibold">Add New Chapter</p>)}
+              {modalType === 'subchapter' && (<p className="text-center text-sh3 font-semibold">Add New Sub Chapter</p>)}
+              {modalType === 'material' && (<p className="text-center text-sh3 font-semibold">Add New Material</p>)}
+              {modalType === 'subchapter' && selectedChapterId && (
+                <p className="text-center text-b5 text-black mt-1">
+                  in {chapters.find(c => c.id === selectedChapterId)?.title}
+                </p>
+              )}
+              {modalType === 'material' && selectedSubId && (
+                <p className="text-center text-b5 text-black mt-1">
+                  in {chapters
+                    .find(c => c.id === selectedChapterId)
+                    ?.subchapters.find(s => s.id === selectedSubId)?.title}
+                </p>
+              )}
               <Input
+                type='auth'
                 value={inputTitle}
                 onChange={(e) => setInputTitle(e.target.value)}
-                placeholder={`Enter ${modalType} title...`}
-                className="bg-blue-50 border-none"
+                placeholder={`${modalType}'s title...`}
+                className="placeholder:text-b6 placeholder:font-normal mt-5 h-15"
               />
             </div>
 
@@ -543,19 +584,7 @@ export default function ClassActivityPage() {
                       Selected: {selectedFile.name}
                     </p>
                   )}
-                </div>
-
-                <div className="text-center text-gray-400 text-sm">OR</div>
-
-                <div className="space-y-2">
-                  <Label>Paste URL</Label>
-                  <Input
-                    value={inputUrl}
-                    onChange={(e) => setInputUrl(e.target.value)}
-                    placeholder="https://..."
-                    className="bg-blue-50 border-none"
-                  />
-                </div>
+                </div>                
               </div>
             )}
           </div>
@@ -564,13 +593,22 @@ export default function ClassActivityPage() {
             <Button 
               onClick={handleSave}
               disabled={!inputTitle}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              className="w-full bg-blue-base hover:bg-blue-700 hover:scale-100 text-white"
             >
-              Save
+              {isSubmitting ? (
+                <>
+                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                   Saving...
+                </>
+              ) : (
+                <p className='text-b6 font-semibold'>Save</p>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* BATAS DISINI */}
     </div>
   );
 }

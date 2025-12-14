@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import Image from "next/image"; 
 
 import { db } from "@/lib/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
@@ -14,19 +15,26 @@ import { v4 as uuidv4 } from 'uuid';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Plus, Loader2, Calendar as CalendarIcon } from "lucide-react";
+import { Loader2, X, Sparkles } from "lucide-react"; 
 import { toast } from "sonner";
+import { CustomIcon } from "@/components/ui/CustomIcon";
+import { AskLynxModal } from "@/app/(main)/(guru)/components/AskLynxModal";
 
 // Validation Schema
 const assignmentSchema = z.object({
   title: z.string().min(3, "Judul minimal 3 karakter"),
   description: z.string().optional(),
   deadline: z.string().optional(),
-  rubric: z.string().optional(), // 🔥 CHANGED: String instead of file
 });
 
 type AssignmentFormValues = z.infer<typeof assignmentSchema>;
+
+// [BARU] Tipe data Hybrid (Bisa File Lokal ATAU URL dari AI)
+interface FileData {
+  file: File | null; // Jika upload manual
+  url: string | null; // Jika dari AI
+  name: string;      // Nama untuk ditampilkan di UI
+}
 
 export default function NewAssignmentPage() {
   const { id } = useParams();
@@ -37,12 +45,11 @@ export default function NewAssignmentPage() {
   const subId = searchParams.get('subId');
 
   const [loading, setLoading] = useState(false);
-  const [subchapterTitle, setSubchapterTitle] = useState("Loading...");
+  const [isLynxModalOpen, setIsLynxModalOpen] = useState(false); // State Modal
   
-  // Files state
-  const [questionFile, setQuestionFile] = useState<File | null>(null);
-  const [additionalFiles, setAdditionalFiles] = useState<File[]>([]);
-  // 🔥 REMOVED: rubricFile state (now using form input)
+  // [MODIFIKASI] State File sekarang menggunakan tipe FileData
+  const [questionData, setQuestionData] = useState<FileData | null>(null);
+  const [rubricData, setRubricData] = useState<FileData | null>(null);
 
   const form = useForm<AssignmentFormValues>({
     resolver: zodResolver(assignmentSchema),
@@ -50,79 +57,76 @@ export default function NewAssignmentPage() {
       title: "",
       description: "",
       deadline: "",
-      rubric: "", // 🔥 ADDED: Rubric as string
     },
   });
 
-  // Fetch Subchapter Title
-  useEffect(() => {
-    const fetchSubchapter = async () => {
-      if (!chapterId) return;
-      const docRef = doc(db, "classes", id as string, "chapters", chapterId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const sub = data.subchapters?.find((s: any) => s.id === subId);
-        if (sub) setSubchapterTitle(sub.title);
-      }
-    };
-    fetchSubchapter();
-  }, [chapterId, subId, id]);
-
-  // Upload to Cloudinary
+  // Fungsi Upload ke Cloudinary (Hanya dipanggil jika file lokal)
   const uploadFile = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("upload_preset", process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!);
-
     const endpoint = file.type.startsWith('image/')
       ? `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`
-      : `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/raw/upload`;
-
+      : `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/raw/upload`; 
     const res = await fetch(endpoint, { method: "POST", body: formData });
     const data = await res.json();
     if (!data.secure_url) throw new Error("Upload failed");
     return data.secure_url;
   };
 
+  // [BARU] Callback saat AI selesai generate
+  const handleAiSuccess = (qUrl: string, rUrl: string) => {
+    // Inject URL AI ke state, seolah-olah user sudah upload
+    setQuestionData({
+      file: null,
+      url: qUrl,
+      name: "AI_Generated_Question.pdf"
+    });
+    setRubricData({
+      file: null,
+      url: rUrl,
+      name: "AI_Generated_Rubric.pdf"
+    });
+  };
+
   // Submit Handler
   const onSubmit = async (data: AssignmentFormValues, status: 'draft' | 'published') => {
-    if (!chapterId || !subId) {
-      return toast.error("Error: Parameter tidak lengkap");
-    }
+    if (!chapterId || !subId) return toast.error("Error: Parameter tidak lengkap");
 
     setLoading(true);
     try {
-      // Upload all files
-      let questionFileUrl = "";
-      const additionalFileUrls: string[] = [];
+      let finalQuestionUrl = "";
+      let finalRubricUrl = "";
 
-      if (questionFile) {
-        toast.info("Uploading question file...");
-        questionFileUrl = await uploadFile(questionFile);
-      }
-
-      // 🔥 REMOVED: rubric file upload
-
-      if (additionalFiles.length > 0) {
-        toast.info("Uploading additional files...");
-        for (const file of additionalFiles) {
-          const url = await uploadFile(file);
-          additionalFileUrls.push(url);
+      // 1. Handle Question Data
+      if (questionData) {
+        if (questionData.file) {
+          // Kasus A: File Lokal -> Upload dulu
+          toast.info("Uploading question file...");
+          finalQuestionUrl = await uploadFile(questionData.file);
+        } else if (questionData.url) {
+          // Kasus B: Dari AI -> Langsung pakai URL
+          finalQuestionUrl = questionData.url;
         }
       }
 
-      // Fetch chapter
+      // 2. Handle Rubric Data
+      if (rubricData) {
+        if (rubricData.file) {
+          toast.info("Uploading rubric file...");
+          finalRubricUrl = await uploadFile(rubricData.file);
+        } else if (rubricData.url) {
+          finalRubricUrl = rubricData.url;
+        }
+      }
+
+      // 3. Update Firestore
       const chapterRef = doc(db, "classes", id as string, "chapters", chapterId);
       const chapterSnap = await getDoc(chapterRef);
 
-      if (!chapterSnap.exists()) {
-        throw new Error("Chapter tidak ditemukan");
-      }
-
+      if (!chapterSnap.exists()) throw new Error("Chapter tidak ditemukan");
       const chapterData = chapterSnap.data();
 
-      // Update nested structure
       const updatedSubchapters = chapterData.subchapters.map((sub: any) => {
         if (sub.id === subId) {
           return {
@@ -134,9 +138,8 @@ export default function NewAssignmentPage() {
                 title: data.title,
                 description: data.description || "",
                 deadline: data.deadline ? new Date(data.deadline).toISOString() : null,
-                questionFileUrl: questionFileUrl,
-                rubric: data.rubric || "", // 🔥 CHANGED: Save as string
-                additionalFiles: additionalFileUrls,
+                questionFileUrl: finalQuestionUrl,
+                rubricFileUrl: finalRubricUrl, 
                 status: status,
                 publishedAt: new Date().toISOString(),
                 createdAt: new Date().toISOString(),
@@ -147,198 +150,143 @@ export default function NewAssignmentPage() {
         return sub;
       });
 
-      await updateDoc(chapterRef, {
-        subchapters: updatedSubchapters
-      });
+      await updateDoc(chapterRef, { subchapters: updatedSubchapters });
 
-      const message = status === 'published' 
-        ? "✅ Tugas berhasil diterbitkan!" 
-        : "💾 Tugas disimpan sebagai draft";
-      toast.success(message);
+      toast.success(status === 'published' ? "✅ Tugas diterbitkan!" : "💾 Disimpan sebagai draft");
       router.push(`/class/${id}/activity`);
 
     } catch (error) {
-      console.error("Error creating assignment:", error);
+      console.error("Error:", error);
       toast.error("Gagal menyimpan tugas");
     } finally {
       setLoading(false);
     }
   };
 
+  // Helper untuk set File Lokal
+  const handleLocalFileSelect = (file: File | null, type: 'question' | 'rubric') => {
+    if (!file) {
+      if(type === 'question') setQuestionData(null);
+      else setRubricData(null);
+      return;
+    }
+    const newData: FileData = { file: file, url: null, name: file.name };
+    if(type === 'question') setQuestionData(newData);
+    else setRubricData(newData);
+  };
+
+  // --- UI RENDERER (Diupdate untuk handle FileData) ---
+  const renderFileUpload = (
+    dataState: FileData | null, 
+    type: 'question' | 'rubric',
+    inputId: string
+  ) => {
+    if (dataState) {
+      // TAMPILAN JIKA ADA DATA (BAIK FILE LOKAL MAUPUN AI)
+      return (
+        <div className="relative group">
+           <div className={`flex items-center gap-4 bg-white p-4 rounded-xl border shadow-sm ${!dataState.file ? "border-purple-200 bg-purple-50" : "border-gray-200"}`}>
+              <Image src="/pdf.png" alt="File Icon" width={40} height={40} className="w-10 h-10 object-contain"/>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">{dataState.name}</p>
+                <p className="text-xs text-gray-500">
+                  {dataState.file ? `${(dataState.file.size / 1024 / 1024).toFixed(2)} MB` : "Generated by Lynx AI ✨"}
+                </p>
+              </div>
+              <button type="button" onClick={() => type === 'question' ? setQuestionData(null) : setRubricData(null)} className="p-2 hover:bg-red-50 rounded-full transition-colors">
+                <X className="w-5 h-5 text-red-500" />
+              </button>
+           </div>
+        </div>
+      );
+    }
+
+    // TAMPILAN DEFAULT (UPLOAD BUTTON)
+    return (
+      <>
+        <input
+          type="file"
+          accept="image/*,application/pdf,.doc,.docx"
+          onChange={(e) => handleLocalFileSelect(e.target.files?.[0] || null, type)}
+          className="hidden"
+          id={inputId}
+        />
+        <label htmlFor={inputId}>
+          <div className="flex items-center justify-center gap-3 bg-purple-600 hover:bg-purple-700 text-white w-full h-14 rounded-xl cursor-pointer transition-all active:scale-95">
+            <CustomIcon src="/plus.png" className="w-6 h-6 bg-white" />
+            <p className="text-sh6 font-semibold">Add File/Image</p>
+          </div>
+        </label>
+      </>
+    );
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
-      
-      {/* HEADER */}
-      <div className="bg-white border-b px-6 md:px-12 py-6 mb-8">
-        <h1 className="text-4xl font-bold text-blue-600 mb-2">Make New Assignment</h1>
-        <p className="text-gray-500 text-sm">in {subchapterTitle}</p>
-      </div>
+    <div className="min-h-screen bg-gray-50 pb-20 mx-20 mt-11">
+      {/* MODAL LYNX DI SINI */}
+      <AskLynxModal 
+        isOpen={isLynxModalOpen} 
+        onClose={() => setIsLynxModalOpen(false)} 
+        onSuccess={handleAiSuccess} 
+      />
+
+      <div className="mb-10"><p className="text-sh3 font-semibold bg-linear-to-r from-blue-40 to-blue-base bg-clip-text text-transparent">Make New Assignment</p></div>
 
       <form onSubmit={(e) => e.preventDefault()}>
-        <div className="max-w-7xl mx-auto px-6 md:px-12 grid grid-cols-1 lg:grid-cols-2 gap-8">
-          
-          {/* LEFT COLUMN - Assignment Details */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* KOLOM KIRI (Sama seperti sebelumnya) */}
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">Assignment Details</h2>
-
-            {/* Title */}
+            <h2 className="text-sh4 font-semibold text-black">Assignment Details</h2>
             <div className="space-y-2">
               <Label className="text-base font-semibold">Assignment's Title</Label>
-              <Input
-                {...form.register('title')}
-                placeholder="Write here"
-                className="bg-blue-50 border-none h-14 text-base placeholder:text-gray-400"
-              />
-              {form.formState.errors.title && (
-                <p className="text-red-500 text-sm">{form.formState.errors.title.message}</p>
-              )}
+              <Input variant={"auth"} {...form.register('title')} placeholder="Write here" />
+              {form.formState.errors.title && <p className="text-red-500 text-sm">{form.formState.errors.title.message}</p>}
             </div>
-
-            {/* Description */}
             <div className="space-y-2">
               <Label className="text-base font-semibold">Description</Label>
-              <Textarea
-                {...form.register('description')}
-                placeholder="Write here"
-                className="bg-blue-50 border-none min-h-[120px] text-base placeholder:text-gray-400 resize-none"
-              />
+              <Input variant="auth" {...form.register('description')} placeholder="Write here" />
             </div>
-
-            {/* Deadline */}
             <div className="space-y-2">
               <Label className="text-base font-semibold">Set Deadline</Label>
-              <div className="relative">
-                <Input
-                  type="date"
-                  {...form.register('deadline')}
-                  placeholder="DD/MM/YY"
-                  className="bg-blue-50 border-none h-14 text-base placeholder:text-gray-400 pr-12"
-                />
-                <CalendarIcon className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Additional Files */}
-            <div className="pt-4">
-              <input
-                type="file"
-                multiple
-                onChange={(e) => {
-                  const files = Array.from(e.target.files || []);
-                  setAdditionalFiles(prev => [...prev, ...files]);
-                }}
-                className="hidden"
-                id="additional-files"
-              />
-              <label htmlFor="additional-files">
-                <Button
-                  type="button"
-                  className="bg-purple-600 hover:bg-purple-700 text-white w-full h-14"
-                  onClick={() => document.getElementById('additional-files')?.click()}
-                >
-                  <Plus className="w-5 h-5 mr-2" />
-                  Add Addition Files
-                </Button>
-              </label>
-              
-              {additionalFiles.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {additionalFiles.map((file, idx) => (
-                    <div key={idx} className="flex items-center justify-between bg-white px-4 py-2 rounded-lg border text-sm">
-                      <span className="truncate">{file.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => setAdditionalFiles(prev => prev.filter((_, i) => i !== idx))}
-                        className="text-red-500 hover:text-red-700 ml-2"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <Input variant="auth" type="date" {...form.register('deadline')} />
             </div>
           </div>
 
-          {/* RIGHT COLUMN - Scoring Details */}
+          {/* KOLOM KANAN */}
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">Scoring Details</h2>
+            <h2 className="text-sh4 font-semibold">Scoring Details</h2>
 
             {/* Questions Details */}
             <div className="space-y-3">
               <Label className="text-base font-semibold">Questions Details</Label>
-              <input
-                type="file"
-                accept="image/*,application/pdf"
-                onChange={(e) => setQuestionFile(e.target.files?.[0] || null)}
-                className="hidden"
-                id="question-file"
-              />
-              <label htmlFor="question-file">
-                <Button
-                  type="button"
-                  className="bg-purple-600 hover:bg-purple-700 text-white w-full h-14"
-                  onClick={() => document.getElementById('question-file')?.click()}
-                >
-                  <Plus className="w-5 h-5 mr-2" />
-                  Add File/Image
-                </Button>
-              </label>
-              {questionFile && (
-                <div className="bg-white px-4 py-3 rounded-lg border text-sm flex items-center justify-between">
-                  <span className="truncate">{questionFile.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => setQuestionFile(null)}
-                    className="text-red-500 hover:text-red-700 ml-2"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
+              {renderFileUpload(questionData, 'question', "question-file-input")}
             </div>
 
             {/* Assignment Rubric */}
             <div className="space-y-3">
               <Label className="text-base font-semibold">Assignment Rubric</Label>
-              <Textarea
-                {...form.register('rubric')}
-                placeholder="Masukkan kriteria penilaian tugas..."
-                className="bg-blue-50 border-none min-h-[150px] text-base placeholder:text-gray-400 resize-none"
-              />
-              <p className="text-xs text-gray-500">
-                Contoh: Ketepatan jawaban (40%), Kreativitas (30%), Presentasi (30%)
-              </p>
+              {renderFileUpload(rubricData, 'rubric', "rubric-file-input")}
               
-              {/* Ask Lynx - Placeholder */}
-              <button
-                type="button"
-                className="text-blue-600 hover:text-blue-700 font-semibold text-sm"
-                onClick={() => toast.info("Feature coming soon!")}
-              >
-                Ask Lynx to do it
-              </button>
+              <div className="flex justify-end">
+                <button
+                    type="button"
+                    onClick={() => setIsLynxModalOpen(true)} // BUKA MODAL
+                    className="text-purple-600 hover:text-purple-700 font-semibold text-sm flex items-center gap-1 transition-all hover:gap-2"
+                >
+                    <Sparkles className="w-4 h-4" />
+                    Ask Lynx to do it
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* ACTION BUTTONS */}
+        {/* TOMBOL SAVE */}
         <div className="max-w-7xl mx-auto px-6 md:px-12 mt-12 flex justify-center gap-4">
-          <Button
-            type="button"
-            onClick={form.handleSubmit((data) => onSubmit(data, 'draft'))}
-            disabled={loading}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-12 h-14 text-lg font-semibold rounded-xl"
-          >
+          <Button type="button" onClick={form.handleSubmit((data) => onSubmit(data, 'draft'))} disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white px-12 h-14 text-lg font-semibold rounded-xl">
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save As Draft"}
           </Button>
-          
-          <Button
-            type="button"
-            onClick={form.handleSubmit((data) => onSubmit(data, 'published'))}
-            disabled={loading}
-            className="bg-yellow-400 hover:bg-yellow-500 text-black px-12 h-14 text-lg font-semibold rounded-xl"
-          >
+          <Button type="button" onClick={form.handleSubmit((data) => onSubmit(data, 'published'))} disabled={loading} className="bg-yellow-400 hover:bg-yellow-500 text-black px-12 h-14 text-lg font-semibold rounded-xl">
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Publish Now"}
           </Button>
         </div>
