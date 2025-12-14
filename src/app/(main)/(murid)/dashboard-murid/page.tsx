@@ -650,19 +650,19 @@ export default function DashboardMuridPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {/* On Going */}
             <div>
-              <div className="text-center text-sm font-extrabold text-[#3D5AFE] mb-4">On Going</div>
+              <div className="text-center text-sh5 font-semibold text-blue-60 mb-4">On Going</div>
               <div className="space-y-4">
                 {visualAssignments.ongoing.map((t) => (
                   <div key={t.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-                    <div className="font-extrabold text-[12px] text-gray-900">{t.title}</div>
-                    <div className="text-[10px] text-gray-500 mt-1">
+                    <div className="font-semibold text-sh6 text-black">{t.title}</div>
+                    <div className="text-b9 text-blue-100 mt-1">
                       {t.subject}
                       {t.publishedAt
                         ? ` | Published on ${format(t.publishedAt.toDate(), "dd MMM yyyy - HH:mm", { locale: indonesia })}`
                         : ""}
                     </div>
                     <div className="mt-3 flex items-center justify-end">
-                      <span className="text-[10px] font-bold text-[#3D5AFE]">
+                      <span className="text-b9 font-semibold text-blue-base">
                         {/* sengaja statik agar mirip screenshot */}
                         7 days 12 hours left
                       </span>
@@ -674,13 +674,13 @@ export default function DashboardMuridPage() {
 
             {/* Graded */}
             <div>
-              <div className="text-center text-sm font-extrabold text-[#3D5AFE] mb-4">Graded</div>
+              <div className="text-center text-sh5 font-semibold text-blue-60 mb-4">Graded</div>
               <div className="space-y-4">
                 {visualAssignments.graded.map((t) => (
                   <div key={t.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex gap-4">
                     <div className="flex-1">
-                      <div className="font-extrabold text-[12px] text-gray-900">{t.title}</div>
-                      <div className="text-[10px] text-gray-500 mt-1">
+                      <div className="font-semibold text-sh6 text-black">{t.title}</div>
+                      <div className="text-b9 text-blue-100 mt-1">
                         {t.subject}
                         {t.publishedAt
                           ? ` | Published on ${format(t.publishedAt.toDate(), "dd MMM yyyy - HH:mm", { locale: indonesia })}`
@@ -698,19 +698,19 @@ export default function DashboardMuridPage() {
 
             {/* Submitted */}
             <div>
-              <div className="text-center text-sm font-extrabold text-[#3D5AFE] mb-4">Submitted</div>
+              <div className="text-center text-sh5 font-semibold text-blue-60 mb-4">Submitted</div>
               <div className="space-y-4">
                 {visualAssignments.submitted.map((t) => (
                   <div key={t.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-                    <div className="font-extrabold text-[12px] text-gray-900">{t.title}</div>
-                    <div className="text-[10px] text-gray-500 mt-1">
+                    <div className="font-semibold text-sh6 text-black">{t.title}</div>
+                    <div className="text-b9 text-blue-100 mt-1">
                       {t.subject}
                       {t.publishedAt
                         ? ` | Published on ${format(t.publishedAt.toDate(), "dd MMM yyyy - HH:mm", { locale: indonesia })}`
                         : ""}
                     </div>
                     <div className="mt-3 text-right">
-                      <span className="text-[10px] font-bold text-[#3D5AFE]">
+                      <span className="text-b9 font-semibold text-blue-base">
                         Submitted on{" "}
                         {t.submittedAt
                           ? format(t.submittedAt.toDate(), "dd MMM yyyy - HH:mm", { locale: indonesia })
@@ -727,9 +727,9 @@ export default function DashboardMuridPage() {
         {/* Rekomendasi Bahan Belajar (By Lynx) */}
         <section className="mt-12">
           <div className="mb-4">
-            <h2 className="text-2xl font-extrabold text-gray-900">Rekomendasi Bahan Belajar</h2>
-            <p className="text-sm text-gray-600">
-              By <span className="font-extrabold text-[#3D5AFE]">Lynx</span>
+            <h2 className="text-sh3 font-bold text-black">Rekomendasi Bahan Belajar</h2>
+            <p className="text-sh4 text-black font-normal">
+              By <span className="font-extrabold bg-linear-to-r from-[#46C8FF] to-[#2A7899] bg-clip-text text-transparent">Lynx</span>
             </p>
           </div>
 

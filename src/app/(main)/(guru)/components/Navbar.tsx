@@ -14,7 +14,7 @@ export default function Navbar() {
     const classId = params?.id as string;
     
     // Cek apakah user sedang berada di dalam rute kelas
-    const isClassPage = pathname.startsWith('/class') && classId;
+    const isClassPage = pathname.startsWith('/manage-class') && classId;
 
     // Helper untuk style active/inactive agar rapi dan konsisten dengan desainmu
     const getLinkStyle = (isActive: boolean) => {
@@ -50,21 +50,21 @@ export default function Navbar() {
                     // === MENU KHUSUS KELAS ===
                     <div className="flex gap-29"> {/* Gap antar menu kelas */}
                         {/* 1. Homepage */}
-                        <Link href={`/class/${classId}`}>
-                            <h1 className={getLinkStyle(pathname === `/class/${classId}`)}>
+                        <Link href={`/manage-class/${classId}`}>
+                            <h1 className={getLinkStyle(pathname === `/manage-class/${classId}`)}>
                                 Homepage
                             </h1>
                         </Link>
 
                         {/* 2. Activity */}
-                        <Link href={`/class/${classId}/activity`}>
+                        <Link href={`/manage-class/${classId}/activity`}>
                             <h1 className={getLinkStyle(pathname.includes('/activity'))}>
                                 Activity
                             </h1>
                         </Link>
 
                         {/* 3. My Students */}
-                        <Link href={`/class/${classId}/my-students`}>
+                        <Link href={`/manage-class/${classId}/my-students`}>
                             <h1 className={getLinkStyle(pathname.includes('/my-students'))}>
                                 My Students
                             </h1>

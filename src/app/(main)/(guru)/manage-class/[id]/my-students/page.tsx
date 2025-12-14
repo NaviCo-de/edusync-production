@@ -1,57 +1,38 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, doc, getDoc } from "firebase/firestore";
-
-// UI Components (Pakai library standar HTML + Tailwind biar gak ribet dependency)
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table"; // Pastikan kamu punya shadcn table, kalau gak ada, pakai div biasa
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"; // Asumsi pakai shadcn avatar
+import { collection, getDocs, doc, deleteDoc, updateDoc, arrayRemove } from "firebase/firestore";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Mail, User, MoreVertical, Trash2 } from "lucide-react";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
-} from "@/components/ui/dropdown-menu";
+import { Search, Bell, ExternalLink } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-// Definisi Tipe Data Murid (Blueprint)
+// Definisi Tipe Data Murid
 interface Student {
-  id: string; // ID dokumen (biasanya UID user)
+  id: string;
   nama: string;
-  email: string;
-  photoUrl?: string; // Optional
-  joinedAt?: any; // Timestamp
+  nis?: string;
+  photoURL?: string;
+  email?: string;
+  joinedAt?: any;
 }
 
-export default function ClassStudentsPage() {
+export default function MyStudentsPage() {
   const { id } = useParams() as { id: string };
+  const router = useRouter();
   
-  // State: Tempat penyimpanan sementara di memori browser
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // FUNGSI 1: Ambil Data (Fetching)
+  // Fetch Students dari subcollection
   useEffect(() => {
     const fetchStudents = async () => {
       try {
-        // Logika Kritis:
-        // Kita tidak mengambil data dari collection 'users' langsung,
-        // melainkan dari sub-collection 'students' di dalam dokumen kelas spesifik.
         // Path: classes -> [classID] -> students
-        
-        // Cek dulu apakah referensi collection ini benar sesuai databasemu
         const studentsRef = collection(db, "classes", id, "students");
         const snapshot = await getDocs(studentsRef);
 
@@ -71,116 +52,178 @@ export default function ClassStudentsPage() {
     if (id) fetchStudents();
   }, [id]);
 
-  // FUNGSI 2: Filter Pencarian (Client Side)
-  // Analogi: Menyaring pasir (data) dengan ayakan (query)
+  // Filter Pencarian
   const filteredStudents = students.filter((student) => 
-    student.nama.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    student.email.toLowerCase().includes(searchQuery.toLowerCase())
+    student.nama?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    student.nis?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Loading State UI
+  // Fungsi untuk kick/remove student dari class
+  const handleKickStudent = async (studentId: string, studentName: string) => {
+    if (!confirm(`Apakah Anda yakin ingin mengeluarkan ${studentName} dari kelas?`)) {
+      return;
+    }
+
+    try {
+      // 1. Hapus dari subcollection students di class
+      await deleteDoc(doc(db, "classes", id, "students", studentId));
+      
+      // 2. Hapus classId dari array daftarKelas di user document
+      const userRef = doc(db, "users", studentId);
+      await updateDoc(userRef, {
+        daftarKelas: arrayRemove(id)
+      });
+      
+      // 3. Update state untuk remove dari UI
+      setStudents(prevStudents => prevStudents.filter(s => s.id !== studentId));      
+    } catch (error) {
+      console.error("Error removing student:", error);
+      alert("Gagal mengeluarkan student. Silakan coba lagi.");
+    }
+  };
+
+  // Loading State
   if (loading) {
     return (
-      <div className="flex h-[50vh] items-center justify-center">
-        <p className="text-gray-400 animate-pulse">Sedang membuka buku absensi...</p>
+      <div className="flex h-screen items-center justify-center bg-[#F4F6FB]">
+        <p className="text-gray-400 animate-pulse">Loading students...</p>
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8">
-      
-      {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Daftar Murid</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Total {students.length} murid bergabung di kelas ini
-          </p>
-        </div>
-
-        {/* Search Bar */}
-        <div className="relative w-full md:w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input 
-                placeholder="Cari nama atau email..." 
-                className="pl-9 bg-white"
+    <div className="min-h-screen bg-[#F4F6FB]">
+      <div className="mx-20 px-8 py-8">
+        
+        {/* HEADER SECTION */}
+        <div className="flex justify-between items-center mb-10">
+          <h1 className="text-sh1 font-semibold 
+                        bg-linear-to-r from-blue-20 via-blue-40 to-blue-base
+                        bg-clip-text text-transparent"
+          >
+            My Students
+          </h1>
+          
+          <div className="flex items-center gap-4">
+            {/* Search Bar */}
+            <div className="relative w-[400px]">
+              <Input 
+                placeholder="Search" 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-            />
-        </div>
-      </div>
-
-      {/* TABLE SECTION */}
-      <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-        {filteredStudents.length > 0 ? (
-          <Table>
-            <TableHeader className="bg-gray-50">
-              <TableRow>
-                <TableHead className="w-[80px]">Avatar</TableHead>
-                <TableHead>Nama Lengkap</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead className="text-right">Aksi</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredStudents.map((student) => (
-                <TableRow key={student.id} className="hover:bg-gray-50 transition-colors">
-                  {/* Avatar Cell */}
-                  <TableCell>
-                    <Avatar className="h-10 w-10 border border-gray-200">
-                      <AvatarImage src={student.photoUrl} alt={student.nama} />
-                      <AvatarFallback className="bg-blue-100 text-blue-600 font-medium">
-                        {student.nama.charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                  </TableCell>
-                  
-                  {/* Name Cell */}
-                  <TableCell>
-                    <div className="font-medium text-gray-900">{student.nama}</div>
-                    <div className="text-xs text-gray-500 md:hidden">{student.email}</div>
-                  </TableCell>
-                  
-                  {/* Email Cell */}
-                  <TableCell className="hidden md:table-cell text-gray-600">
-                    <div className="flex items-center gap-2">
-                        <Mail className="h-3 w-3" />
-                        {student.email}
-                    </div>
-                  </TableCell>
-
-                  {/* Action Cell */}
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem className="text-red-600 focus:text-red-600 cursor-pointer">
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Keluarkan Murid
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        ) : (
-          // EMPTY STATE (Kalau belum ada murid atau hasil search nihil)
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="bg-gray-100 p-4 rounded-full mb-4">
-                <User className="h-8 w-8 text-gray-400" />
+                className="h-12 pl-5 pr-12 rounded-full bg-white border-none shadow-sm text-sm"
+              />
+              <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
             </div>
-            <h3 className="text-lg font-medium text-gray-900">Tidak ada murid ditemukan</h3>
-            <p className="text-gray-500 max-w-sm mt-1">
-               {searchQuery 
-                 ? "Coba gunakan kata kunci pencarian yang lain." 
-                 : "Bagikan kode kelas kepada murid agar mereka bisa bergabung."}
+            
+            {/* Bell Icon */}
+            <button className="h-12 w-12 rounded-full bg-white shadow-sm flex items-center justify-center">
+              <Bell className="h-5 w-5 text-[#6C63FF]" />
+            </button>
+          </div>
+        </div>
+
+        {/* SCORE RECAP SECTION - Hardcoded */}
+        <div className="mb-12">
+          <h2 className="text-[32px] font-bold text-black mb-6">Score Recap</h2>
+          
+          <div className="bg-white rounded-[20px] p-8 shadow-sm flex justify-between items-center">
+            {/* Left Info */}
+            <div>
+              <h3 className="text-[24px] font-bold text-black mb-2">
+                TK2 Kalkulus 1:<br />Penerapan Integral
+              </h3>
+              <div className="flex items-center gap-8 mt-4">
+                <div>
+                  <p className="text-[#6C63FF] text-sm font-semibold">Total Submission</p>
+                  <p className="text-[#6C63FF] text-2xl font-bold mt-1">3 Students</p>
+                </div>
+              </div>
+              <Button 
+                className="mt-6 bg-[#6C63FF] hover:bg-[#5A52E0] text-white rounded-full px-8 py-3 font-semibold"
+                onClick={() => {/* Navigate to review page */}}
+              >
+                See The Review
+              </Button>
+            </div>
+
+            {/* Right Diagram Placeholder */}
+            <div className="w-[600px] h-[300px] bg-gray-100 rounded-xl flex items-center justify-center">
+              <span className="text-gray-400 text-sm font-medium">FRAME DIAGRAM</span>
+            </div>
+          </div>
+        </div>
+
+        {/* LIST OF STUDENTS SECTION */}
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-[32px] font-bold text-black">List of Student</h2>
+          <span className="text-[20px] font-bold text-[#B8A229]">
+            {filteredStudents.length} Students
+          </span>
+        </div>
+
+        {/* Students Grid - 2 Columns */}
+        {filteredStudents.length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {filteredStudents.map((student) => (
+              <div 
+                key={student.id}
+                className="bg-white rounded-[20px] p-6 shadow-sm flex items-center justify-between"
+              >
+                {/* Left: Avatar + Info */}
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-16 w-16 border-2 border-gray-100">
+                    <AvatarImage src={student.photoURL} alt={student.nama} />
+                    <AvatarFallback className="bg-[#E8E7FF] text-[#6C63FF] font-bold text-lg">
+                      {student.nama?.charAt(0).toUpperCase() || "S"}
+                    </AvatarFallback>
+                  </Avatar>
+                  
+                  <div>
+                    <h3 className="text-[18px] font-bold text-[#B8A229]">
+                      {student.nama || "No Name"}
+                    </h3>
+                    <p className="text-[14px] text-gray-600 mt-1">
+                      {student.nis || "No Student ID"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Right: Buttons */}
+                <div className="flex items-center gap-3">
+                  <Button 
+                    className="bg-[#FFD54F] hover:bg-[#E5C04A] text-[#5A4F14] rounded-full px-6 py-2 font-bold text-sm"
+                    onClick={() => router.push(`/profile/${student.id}`)}
+                  >
+                    Visit Profile
+                  </Button>
+                  
+                  <button
+                    className="h-12 w-12 rounded-xl bg-white border border-gray-200 hover:bg-red-50 hover:border-red-200 transition-all flex items-center justify-center group"
+                    onClick={() => {handleKickStudent(student.id, student.nama)}}
+                    title="Remove Student"
+                  >
+                    <img 
+                      src="/kick.png" 
+                      alt="Kick Student" 
+                      className="h-6 w-6 opacity-70 group-hover:opacity-100 transition-opacity"
+                    />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          // Empty State
+          <div className="bg-white rounded-[20px] p-16 text-center shadow-sm">
+            <div className="w-20 h-20 bg-gray-100 rounded-full mx-auto flex items-center justify-center mb-4">
+              <span className="text-3xl">👥</span>
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 mb-2">No Students Found</h3>
+            <p className="text-gray-500 max-w-md mx-auto">
+              {searchQuery 
+                ? "Try using different search keywords." 
+                : "Share the class code with students so they can join."}
             </p>
           </div>
         )}

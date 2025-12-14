@@ -230,7 +230,7 @@ export default function ClassActivityPage() {
   // --- NAVIGATE TO ASSIGNMENT PAGE ---
   const goToAssignmentPage = (chapterId: string, subchapterId: string) => {
     router.push(
-      `/class/${classId}/activity/new-assignment?chapterId=${chapterId}&subId=${subchapterId}`
+      `/manage-class/${classId}/activity/new-assignment?chapterId=${chapterId}&subId=${subchapterId}`
     );
   };
 
@@ -502,12 +502,6 @@ export default function ClassActivityPage() {
                                     Belum ada tugas di sub chapter ini
                                   </p>
                                 </>
-                              )}
-
-                              {sub.materials.length === 0 && sub.assignments.length === 0 && (
-                                <p className="text-gray-400 text-center py-8 text-sm">
-                                  Belum ada materi atau tugas di sub chapter ini
-                                </p>
                               )}
 
                             </AccordionContent>
