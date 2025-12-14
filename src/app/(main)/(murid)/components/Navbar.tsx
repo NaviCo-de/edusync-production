@@ -44,10 +44,10 @@ export default function Navbar() {
                 </Link>
 
                 <Link
-                    href={"/my-grades"}
+                    href={"/mygrades"}
                     className=""
                 >
-                    {pathname === '/my-grades' ? (
+                    {pathname === '/mygrades' ? (
                         <h1 className="text-b6 text-blue-base font-normal">My Grades</h1>
                     ) : (
                         <h1 className="text-b6 font-normal hover:text-addition-blue-80">My Grades</h1>

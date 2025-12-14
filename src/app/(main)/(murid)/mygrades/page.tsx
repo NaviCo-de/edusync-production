@@ -349,9 +349,6 @@ export default function MyGradesPage() {
               />
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
             </div>
-            <button className="w-12 h-12 bg-white border border-gray-100 rounded-full flex items-center justify-center text-blue-600 shrink-0 hover:bg-blue-50 transition shadow-sm">
-              <Bell className="w-5 h-5" />
-            </button>
           </div>
         </div>
 

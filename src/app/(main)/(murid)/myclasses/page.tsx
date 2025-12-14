@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
 import { db } from "@/lib/firebase";
 import { 
@@ -9,10 +8,11 @@ import {
   query, 
   where, 
   getDocs, 
-  doc, 
-  getDoc, 
   addDoc,
-  serverTimestamp 
+  updateDoc,
+  serverTimestamp,
+  doc,
+  getDoc
 } from "firebase/firestore";
 import { toast } from "sonner"; 
 
@@ -24,19 +24,16 @@ import {
   Search, 
   Bell, 
   FileText, 
-  Clock, 
   CheckCircle, 
   AlertCircle, 
-  UploadCloud, 
   Loader2,
   Plus
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { id as ind } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 
-// --- 1. MODEL DATA (KONTRAK) ---
+// --- 1. MODEL DATA (INTERFACES) ---
 
 interface Attachment {
   name: string;
@@ -44,20 +41,39 @@ interface Attachment {
   type: string;
 }
 
-// Collection: 'modules' (Soal dari Guru)
-interface AssignmentModule {
+// Format Data Raw dari Database (Nested dalam Array)
+interface AssignmentFromDB {
   id: string;
+  title: string;
+  description: string; 
+  deadline: string;    
+  questionFileUrl?: string; 
+  publishedAt?: string; 
+  status?: string;
+}
+
+// Format Data Gabungan untuk UI
+interface AssignmentUI {
+  id: string; // Assignment ID
   classId: string;
-  className?: string;
+  className: string;
   title: string;
   instructions: string;
   dueDate: string | null;
-  createdAt?: any; // Untuk "Published on"
+  createdAt?: any;
   attachments?: Attachment[];
   points: number; 
+  
+  // Submission Status (Digabung dari collection submissions)
+  submissionStatus: "On Going" | "Submitted" | "Graded";
+  submissionId?: string;
+  myScore?: number;
+  submittedAt?: any;
+  submittedFileName?: string;
+  submittedFileUrl?: string;
 }
 
-// Collection: 'submissions' (Jawaban Murid)
+// Collection: 'submissions' (Root Collection)
 interface SubmissionData {
   id: string;
   assignmentId: string; 
@@ -69,15 +85,6 @@ interface SubmissionData {
   fileName: string;     
   score?: number;       
   feedback?: string;    
-}
-
-// Gabungan untuk UI State
-interface AssignmentUI extends AssignmentModule {
-  submissionStatus: "On Going" | "Submitted" | "Graded";
-  submissionId?: string;
-  myScore?: number;
-  submittedAt?: any;
-  submittedFileName?: string;
 }
 
 export default function MyAssignmentsPage() {
@@ -97,57 +104,83 @@ export default function MyAssignmentsPage() {
   // --- 2. DATA FETCHING ---
   useEffect(() => {
     const fetchData = async () => {
+      // Tunggu user profile loaded
       if (!user || !user.uid || !user.daftarKelas) {
-        setLoadingData(false);
+        if (!userLoading) setLoadingData(false);
         return;
       }
 
       setLoadingData(true);
       try {
-        // A. Ambil Tugas (Modules)
+        // A. AMBIL DATA ASSIGNMENTS (NESTED LOOP)
+        // Struktur: Classes -> Chapters -> Subchapters[] -> Assignments[]
         const assignmentsPromises = user.daftarKelas.map(async (classId) => {
+          // 1. Ambil Nama Kelas
           const classRef = doc(db, "classes", classId);
           const classSnap = await getDoc(classRef);
           const className = classSnap.exists() ? classSnap.data().name : "Unknown Class";
 
-          // PERBAIKAN: Query disederhanakan ke 'classId' saja.
-          // Filter 'type' dan 'status' dipindah ke Javascript (Client-side).
-          // Alasannya: Query multiple 'where' di Firestore MEMBUTUHKAN Composite Index.
-          // Jika Index belum dibuat di Console Firebase, query akan gagal total (return 0).
-          const qModules = query(
-            collection(db, "modules"),
-            where("classId", "==", classId)
-          );
-          
-          const snapModules = await getDocs(qModules);
-          
-          // Filter di sini (Memory)
-          const filteredDocs = snapModules.docs.filter(doc => {
-            const data = doc.data();
-            // Pastikan ini assignment & statusnya published
-            // Kita gunakan logic agak longgar: jika status tidak ada, anggap published (biar muncul dulu)
-            return data.type === "assignment" && (data.status === "published" || !data.status);
+          // 2. Ambil Chapters
+          const chaptersRef = collection(db, "classes", classId, "chapters");
+          const chaptersSnap = await getDocs(chaptersRef);
+
+          const classAssignments: AssignmentUI[] = [];
+
+          chaptersSnap.docs.forEach((chapterDoc) => {
+            const chapterData = chapterDoc.data();
+            
+            // 3. Loop Subchapters Array
+            if (chapterData.subchapters && Array.isArray(chapterData.subchapters)) {
+              chapterData.subchapters.forEach((sub: any) => {
+                
+                // 4. Loop Assignments Array
+                if (sub.assignments && Array.isArray(sub.assignments)) {
+                  sub.assignments.forEach((assign: AssignmentFromDB) => {
+                    
+                    // Filter: Hanya tampilkan jika status published (atau tidak ada status)
+                    if (assign.status === "published" || !assign.status) {
+                      
+                      // Convert single url string ke array object attachment agar UI rapi
+                      const attachmentsList: Attachment[] = assign.questionFileUrl 
+                        ? [{ name: "Material.pdf", url: assign.questionFileUrl, type: "file" }]
+                        : [];
+
+                      classAssignments.push({
+                        id: assign.id,
+                        classId: classId,
+                        className: className,
+                        title: assign.title,
+                        instructions: assign.description || "No instructions provided.",
+                        dueDate: assign.deadline || null,
+                        createdAt: assign.publishedAt || new Date().toISOString(),
+                        attachments: attachmentsList,
+                        points: 100, // Default score max
+                        submissionStatus: "On Going" // Default sebelum di-merge
+                      });
+                    }
+                  });
+                }
+              });
+            }
           });
-          
-          return filteredDocs.map(doc => ({
-            id: doc.id,
-            className,
-            ...doc.data()
-          } as AssignmentModule));
+          return classAssignments;
         });
 
-        const assignmentsResult = (await Promise.all(assignmentsPromises)).flat();
+        // Tunggu semua kelas selesai diloop
+        const nestedAssignmentsResult = (await Promise.all(assignmentsPromises)).flat();
 
-        // B. Ambil Submission Saya
+        // B. AMBIL DATA SUBMISSIONS (ROOT COLLECTION)
+        // Cukup satu query simpel ke root collection 'submissions' berdasarkan studentId
         const qSubmissions = query(
           collection(db, "submissions"),
           where("studentId", "==", user.uid)
         );
         const snapSubmissions = await getDocs(qSubmissions);
-        const mySubmissions = snapSubmissions.docs.map(doc => doc.data() as SubmissionData);
+        const mySubmissions = snapSubmissions.docs.map(doc => ({ id: doc.id, ...doc.data() } as SubmissionData));
 
-        // C. Gabungkan (Merge)
-        const finalData: AssignmentUI[] = assignmentsResult.map((assign) => {
+        // C. MERGE DATA (GABUNGKAN)
+        const finalData: AssignmentUI[] = nestedAssignmentsResult.map((assign) => {
+          // Cari apakah ada submission untuk assignmentId ini
           const sub = mySubmissions.find((s) => s.assignmentId === assign.id);
           
           let status: "On Going" | "Submitted" | "Graded" = "On Going";
@@ -161,27 +194,30 @@ export default function MyAssignmentsPage() {
             submissionId: sub?.id,
             myScore: sub?.score,
             submittedAt: sub?.submittedAt,
-            submittedFileName: sub?.fileName
+            submittedFileName: sub?.fileName,
+            submittedFileUrl: sub?.fileUrl
           };
         });
 
-        // Sort: Deadline terdekat
+        // Sort by Deadline (Terdekat dulu)
         finalData.sort((a, b) => {
-            const dateA = a.dueDate ? new Date(a.dueDate).getTime() : 0;
-            const dateB = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+            const dateA = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+            const dateB = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
             return dateA - dateB;
         });
 
         setAssignments(finalData);
         
-        // Auto-select item pertama yang sesuai filter
+        // Auto-select logic
         if (finalData.length > 0) {
-            const firstItem = finalData.find(f => f.submissionStatus === "On Going") || finalData[0];
-            setSelectedAssignment(firstItem);
+           // Coba pilih yang masih On Going dulu, kalau gak ada ambil yang pertama
+           const firstPriority = finalData.find(f => f.submissionStatus === "On Going") || finalData[0];
+           setSelectedAssignment(firstPriority);
         }
 
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("Error fetching assignments:", error);
+        toast.error("Gagal memuat daftar tugas.");
       } finally {
         setLoadingData(false);
       }
@@ -192,19 +228,19 @@ export default function MyAssignmentsPage() {
     }
   }, [user, userLoading]);
 
-  // --- 3. SUBMISSION LOGIC (Real Cloudinary Upload) ---
+  // --- 3. SUBMISSION LOGIC (ROOT COLLECTION + CHECK EXISTING) ---
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedAssignment || !user) return;
 
-    if (file.size > 10 * 1024 * 1024) { // Limit 10MB
+    if (file.size > 10 * 1024 * 1024) { 
       toast.error("File terlalu besar (Maks 10MB)");
       return;
     }
 
     setIsSubmitting(true);
     try {
-      // 1. Persiapan Upload ke Cloudinary
+      // 1. Upload ke Cloudinary
       const formData = new FormData();
       formData.append("file", file);
       formData.append("upload_preset", process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "");
@@ -212,7 +248,6 @@ export default function MyAssignmentsPage() {
       const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
       if (!cloudName) throw new Error("Cloudinary Config Missing");
 
-      // Gunakan 'auto' resource type agar support PDF, Doc, Image, dll
       const uploadRes = await fetch(
         `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
         { method: "POST", body: formData }
@@ -224,29 +259,54 @@ export default function MyAssignmentsPage() {
       }
 
       const uploadData = await uploadRes.json();
-      const realFileUrl = uploadData.secure_url; // URL asli dari Cloudinary
+      const realFileUrl = uploadData.secure_url; 
       
-      // 2. Buat Object Submission dengan URL asli
-      const newSubmission: Omit<SubmissionData, 'id'> = {
-        assignmentId: selectedAssignment.id,
-        studentId: user.uid,
-        studentName: user.nama || "Siswa",
-        status: "SUBMITTED",
-        submittedAt: serverTimestamp(),
-        fileUrl: realFileUrl, // Pakai URL dari Cloudinary
-        fileName: file.name,
-        score: undefined
-      };
+      // 2. Cek apakah submission sudah ada (untuk Update) atau belum (untuk Create)
+      // Query ke ROOT collection 'submissions'
+      const qExisting = query(
+        collection(db, "submissions"),
+        where("assignmentId", "==", selectedAssignment.id),
+        where("studentId", "==", user.uid)
+      );
+      const existingSnap = await getDocs(qExisting);
 
-      // 3. Simpan data submission ke Firestore
-      const docRef = await addDoc(collection(db, "submissions"), newSubmission);
+      let submissionDocId = "";
 
-      // 4. Update UI State (Optimistic Update)
+      if (!existingSnap.empty) {
+        // CASE: UPDATE (Sudah pernah submit, ganti file)
+        const oldDoc = existingSnap.docs[0];
+        submissionDocId = oldDoc.id;
+        
+        await updateDoc(doc(db, "submissions", submissionDocId), {
+            fileUrl: realFileUrl,
+            fileName: file.name,
+            submittedAt: serverTimestamp(),
+            status: "SUBMITTED" // Reset status jadi submitted jika sebelumnya graded/late
+        });
+        toast.success("Submission updated successfully!");
+      } else {
+        // CASE: CREATE (Baru pertama kali submit)
+        const newSubmission: Omit<SubmissionData, 'id'> = {
+            assignmentId: selectedAssignment.id,
+            studentId: user.uid,
+            studentName: user.nama || "Student",
+            status: "SUBMITTED",
+            submittedAt: serverTimestamp(),
+            fileUrl: realFileUrl,
+            fileName: file.name
+        };
+        const docRef = await addDoc(collection(db, "submissions"), newSubmission);
+        submissionDocId = docRef.id;
+        toast.success("Assignment submitted successfully!");
+      }
+
+      // 3. Optimistic UI Update (Tanpa reload page)
       const updatedAssignment: AssignmentUI = {
         ...selectedAssignment,
         submissionStatus: "Submitted",
-        submissionId: docRef.id,
+        submissionId: submissionDocId,
         submittedFileName: file.name,
+        submittedFileUrl: realFileUrl,
         submittedAt: new Date()
       };
 
@@ -255,12 +315,10 @@ export default function MyAssignmentsPage() {
       );
       setSelectedAssignment(updatedAssignment);
       setFilterStatus("Submitted");
-      
-      toast.success("Tugas berhasil dikumpulkan!");
 
     } catch (error: any) {
       console.error("Gagal submit:", error);
-      toast.error(`Gagal upload: ${error.message}`);
+      toast.error(`Error: ${error.message}`);
     } finally {
       setIsSubmitting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -287,11 +345,12 @@ export default function MyAssignmentsPage() {
     return formatDistanceToNow(due, { addSuffix: false }) + " left";
   };
 
-  // Format Date: "09 Nov 2025 - 09:30"
-  const formatPublishedDate = (timestamp: any) => {
-    if(!timestamp) return "-";
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleDateString("en-GB", { day: '2-digit', month: 'short', year: 'numeric' }) + " - " + date.toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' });
+  const formatDateTime = (dateInput: any) => {
+    if(!dateInput) return "-";
+    const date = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
+    return date.toLocaleDateString("en-GB", { day: '2-digit', month: 'short', year: 'numeric' }) + 
+           " - " + 
+           date.toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' });
   };
 
   if (userLoading || loadingData) return <AssignmentsSkeleton />;
@@ -299,10 +358,8 @@ export default function MyAssignmentsPage() {
   return (
     <div className="min-h-screen bg-[#F8F9FC] p-6 md:p-12 font-sans">
       
-      {/* HEADER SECTION - 1:1 Design */}
+      {/* HEADER SECTION */}
       <div className="flex flex-col gap-8 mb-10">
-        
-        {/* Top Bar: Title & Search */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <h1 className="text-[42px] font-bold text-blue-base tracking-tight leading-none">
                 Let&rsquo;s Back On Track!
@@ -318,13 +375,9 @@ export default function MyAssignmentsPage() {
                         className="pl-10 py-6 rounded-[20px] bg-white border-none shadow-sm text-sm"
                     />
                 </div>
-                <Button size="icon" className="w-12 h-12 rounded-full bg-blue-10 hover:bg-blue-20 text-blue-base shadow-sm">
-                    <Bell className="h-5 w-5" />
-                </Button>
             </div>
         </div>
 
-        {/* Sub Header: My Assignments & Tabs */}
         <div className="flex flex-col md:flex-row justify-between items-center mt-4">
             <h2 className="text-2xl font-bold text-black">My Assignments</h2>
             
@@ -335,8 +388,7 @@ export default function MyAssignmentsPage() {
                         onClick={() => {
                             setFilterStatus(status);
                             const first = assignments.find(a => a.submissionStatus === status);
-                            if(first) setSelectedAssignment(first);
-                            else setSelectedAssignment(null);
+                            setSelectedAssignment(first || null);
                         }}
                         className={cn(
                             "px-6 py-2 rounded-full text-sm font-bold transition-all",
@@ -350,13 +402,12 @@ export default function MyAssignmentsPage() {
                 ))}
             </div>
         </div>
-
       </div>
 
       {/* CONTENT GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         
-        {/* LEFT COLUMN: LIST TUGAS (4 Kolom) */}
+        {/* LEFT COLUMN: LIST TUGAS */}
         <div className="lg:col-span-4 flex flex-col gap-4">
           {filteredAssignments.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-gray-200">
@@ -375,94 +426,94 @@ export default function MyAssignmentsPage() {
                     : "border-transparent hover:shadow-md"
                 )}
               >
-                {/* Blue Indicator for Active Item */}
                 {selectedAssignment?.id === assign.id && (
                     <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-base" />
                 )}
 
                 <div className="mb-2">
                   <span className="bg-blue-base text-white text-[10px] font-bold px-3 py-1 rounded-full">
-                    {assign.className || "Course"}
+                    {assign.className}
                   </span>
                 </div>
                 
-                <h3 className={cn(
-                    "font-bold text-lg mb-1 line-clamp-2 text-[#494B55]", // Warna text abu gelap
-                )}>
+                <h3 className="font-bold text-lg mb-1 line-clamp-2 text-[#494B55]">
                     {assign.title}
                 </h3>
                 
                 <p className="text-[10px] text-gray-400 font-medium mt-1">
-                    Published on {formatPublishedDate(assign.createdAt)}
+                   Deadline: {assign.dueDate ? formatDateTime(assign.dueDate) : "No Deadline"}
                 </p>
               </div>
             ))
           )}
         </div>
 
-        {/* RIGHT COLUMN: DETAIL TUGAS (8 Kolom) */}
+        {/* RIGHT COLUMN: DETAIL TUGAS */}
         <div className="lg:col-span-8">
           {selectedAssignment ? (
             <div className="bg-white rounded-[30px] p-10 shadow-sm min-h-[600px] flex flex-col relative">
               
-              {/* Title & Deadline */}
               <div className="mb-6">
                 <h2 className="text-2xl font-bold text-black mb-1">{selectedAssignment.title}</h2>
-                <p className="text-sm font-medium text-black">
-                  Deadline on {selectedAssignment.dueDate ? new Date(selectedAssignment.dueDate).toLocaleDateString("en-GB", { day: '2-digit', month: 'short', year: 'numeric' }) : "-"} - {selectedAssignment.dueDate ? new Date(selectedAssignment.dueDate).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' }) : ""}
-                </p>
+                <div className="flex justify-between items-center">
+                    <p className="text-sm font-medium text-black">
+                    Due Date: {selectedAssignment.dueDate ? formatDateTime(selectedAssignment.dueDate) : "No Deadline"}
+                    </p>
+                    {selectedAssignment.myScore !== undefined && (
+                        <Badge className="text-lg bg-blue-base">Score: {selectedAssignment.myScore}</Badge>
+                    )}
+                </div>
               </div>
 
-              {/* Description */}
               <div className="text-sm text-[#494B55] leading-relaxed mb-8 whitespace-pre-line">
-                {selectedAssignment.instructions || "No instructions provided."}
+                {selectedAssignment.instructions}
               </div>
 
-              {/* Attachments */}
+              {/* Attachments (Soal) */}
               <div className="space-y-3 mb-10">
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Reference Materials</h4>
                 {selectedAssignment.attachments && selectedAssignment.attachments.length > 0 ? (
                     selectedAssignment.attachments.map((file, idx) => (
-                        <div key={idx} className="flex items-center gap-3 group cursor-pointer">
-                            <div className="w-6 h-6 flex items-center justify-center">
-                                <FileText className="w-5 h-5 text-black" />
+                        <a 
+                            key={idx} 
+                            href={file.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-3 group cursor-pointer p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors w-max"
+                        >
+                            <div className="w-8 h-8 flex items-center justify-center bg-blue-50 rounded-full">
+                                <FileText className="w-4 h-4 text-blue-600" />
                             </div>
-                            <span className="text-sm font-medium text-black group-hover:underline">
-                                {file.name}
-                            </span>
-                        </div>
+                            <div className="flex flex-col">
+                                <span className="text-sm font-medium text-black group-hover:underline truncate max-w-[200px]">
+                                    {file.name}
+                                </span>
+                                <span className="text-[10px] text-gray-400">Click to open</span>
+                            </div>
+                        </a>
                     ))
                 ) : (
-                    // Default Mockup jika tidak ada attachment (sesuai screenshot)
-                    <>
-                        <div className="flex items-center gap-3">
-                            <FileText className="w-5 h-5 text-black" />
-                            <span className="text-sm font-medium text-black">Pembagian Kelompok.pdf</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <FileText className="w-5 h-5 text-black" />
-                            <span className="text-sm font-medium text-black">Soal TK2 Kalkulus Sem Gasal.pdf</span>
-                        </div>
-                    </>
+                    <p className="text-sm text-gray-400 italic">No attachments provided.</p>
                 )}
               </div>
 
               <div className="border-t border-gray-200 w-full mb-6"></div>
 
-              {/* Footer Info Table Style */}
+              {/* Footer Info */}
               <div className="w-full">
                 <div className="grid grid-cols-[200px_1fr] gap-4 py-3 border-b border-gray-200">
-                    <span className="font-bold text-black text-sm">Submission Status</span>
+                    <span className="font-bold text-black text-sm">Status</span>
                     <span className="text-sm text-black font-medium">
-                        {selectedAssignment.submissionStatus === "On Going" ? "No Attempt" : 
-                         selectedAssignment.submissionStatus === "Submitted" ? "Submitted for Grading" : "Graded"}
+                        {selectedAssignment.submissionStatus === "On Going" ? "Not Submitted" : 
+                         selectedAssignment.submissionStatus === "Submitted" ? "Submitted (Waiting for Grade)" : "Graded"}
                     </span>
                 </div>
                 <div className="grid grid-cols-[200px_1fr] gap-4 py-3 border-b border-gray-200">
-                    <span className="font-bold text-black text-sm">Time Remaining</span>
+                    <span className="font-bold text-black text-sm">Remaining Time</span>
                     <span className="text-sm text-black font-medium">
                         {selectedAssignment.submissionStatus === "On Going" 
                             ? getTimeRemaining(selectedAssignment.dueDate)
-                            : "Assignment Completed"}
+                            : "Completed"}
                     </span>
                 </div>
               </div>
@@ -491,21 +542,31 @@ export default function MyAssignmentsPage() {
                         </Button>
                     </>
                 ) : (
-                    <div className="flex flex-col items-center gap-2">
-                        <Badge className="bg-green-100 text-green-700 hover:bg-green-100 px-4 py-2 text-sm">
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                            {selectedAssignment.submissionStatus === "Graded" 
-                                ? `Graded: ${selectedAssignment.myScore}/${selectedAssignment.points}` 
-                                : "Submitted"}
-                        </Badge>
-                        <p className="text-xs text-gray-400">File: {selectedAssignment.submittedFileName}</p>
+                    <div className="flex flex-col items-center gap-3 w-full bg-gray-50 p-6 rounded-2xl border border-gray-100">
+                        <div className="flex items-center gap-2 text-green-600">
+                             <CheckCircle className="w-6 h-6" />
+                             <span className="font-bold">Work Submitted</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-3 bg-white px-4 py-3 rounded-xl border border-gray-200 shadow-sm">
+                            <FileText className="w-5 h-5 text-gray-400" />
+                            <a href={selectedAssignment.submittedFileUrl} target="_blank" className="text-sm text-blue-600 hover:underline font-medium">
+                                {selectedAssignment.submittedFileName || "View File"}
+                            </a>
+                        </div>
+                        
+                        {selectedAssignment.submissionStatus !== "Graded" && (
+                            <Button variant="link" onClick={triggerFileUpload} className="text-xs text-gray-400 hover:text-gray-600">
+                                <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+                                Resubmit File
+                            </Button>
+                        )}
                     </div>
                 )}
               </div>
 
             </div>
           ) : (
-            // Empty State Kanan
             <div className="bg-white rounded-[30px] p-10 shadow-sm min-h-[600px] flex flex-col items-center justify-center text-gray-400">
                 <div className="bg-gray-50 p-6 rounded-full mb-4">
                     <AlertCircle className="w-12 h-12 text-gray-300" />

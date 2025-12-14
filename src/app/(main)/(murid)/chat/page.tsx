@@ -80,7 +80,8 @@ type Message = {
   timestamp?: any;
   createdAt?: number; 
   imageUrl?: string;
-  fileName?: string; // [ADDED] Untuk mendeteksi nama file di UI
+  fileName?: string; 
+  mimeType?: string; // [ADDED] Untuk identifikasi jenis file (PDF vs Image)
 };
 
 type ChatSession = {
@@ -206,7 +207,6 @@ export default function ChatPage() {
       formData.append("file", file);
       formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET || "");
     try {
-      // [CRITICAL FIX] Ganti 'image/upload' ke 'auto/upload' agar support PDF & Raw Files
       const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`, {
         method: "POST",
         body: formData
@@ -229,7 +229,6 @@ export default function ChatPage() {
     const isFirstMessage = messages.length === 0; 
     
     // [OPTIMISTIC UI] 
-    // Handle PDF agar tetap muncul di UI meski tidak ada preview image
     const tempFileUrl = currentFile ? (preview || URL.createObjectURL(currentFile)) : undefined;
 
     const tempUserMessage: Message = {
@@ -238,7 +237,8 @@ export default function ChatPage() {
       content: userMsg,
       type: 'text',
       imageUrl: tempFileUrl, 
-      fileName: currentFile?.name, // Simpan nama file untuk rendering
+      fileName: currentFile?.name, 
+      mimeType: currentFile?.type, // Simpan tipe file di state lokal
       timestamp: null,
       createdAt: Date.now()
     };
@@ -260,12 +260,15 @@ export default function ChatPage() {
       let fileUrl = "";
       if (currentFile) fileUrl = await uploadToCloudinary(currentFile);
 
+      // [CRITICAL FIX] Mengirim mime_type ke backend
       let payload: any = {
         message: userMsg || (currentFile ? "Lampiran File" : ""),
         session_id: sessionId,
         user_id: user.uid,
         history: [], 
-        image_url: fileUrl ? fileUrl : null 
+        image_url: fileUrl ? fileUrl : null,
+        file_url: fileUrl ? fileUrl : null, // Double check, backend might expect this key
+        mime_type: currentFile ? currentFile.type : null // Kirim tipe file (penting untuk PDF)
       };
       
       await axios.post(`${API_URL}/chat/message`, payload);
@@ -285,8 +288,10 @@ export default function ChatPage() {
   const renderMessage = (msg: Message, index: number) => {
     const isUser = msg.role === 'user';
     
-    // Helper: Cek apakah file adalah PDF atau bukan gambar
-    const isPdfOrDoc = msg.imageUrl && (msg.imageUrl.toLowerCase().endsWith('.pdf') || msg.fileName?.toLowerCase().endsWith('.pdf') || !msg.imageUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i));
+    // [LOGIC UPDATE] Deteksi PDF lebih akurat menggunakan mimeType dari DB jika ada
+    const isPdf = (msg.mimeType && msg.mimeType === 'application/pdf') || 
+                  (msg.imageUrl && msg.imageUrl.toLowerCase().endsWith('.pdf')) ||
+                  (msg.fileName && msg.fileName.toLowerCase().endsWith('.pdf'));
 
     return (
       <div key={msg.id || index} className={cn("flex w-full mb-4", isUser ? "justify-end" : "justify-start")}>
@@ -303,14 +308,14 @@ export default function ChatPage() {
             {/* [CRITICAL FIX] Rendering File logic */}
             {msg.imageUrl && (
               <div className="mb-3">
-                {isPdfOrDoc ? (
+                {isPdf ? (
                   // Tampilan untuk PDF/Dokumen
                   <div className={cn("flex items-center gap-3 p-2 rounded-lg border bg-white/10 border-white/20 backdrop-blur-sm", isUser ? "text-white" : "text-gray-800 border-gray-200 bg-gray-50")}>
                     <div className="bg-white/20 p-2 rounded shrink-0">
                       <FileText className="w-5 h-5" />
                     </div>
                     <div className="flex flex-col min-w-0 flex-1">
-                      <span className="text-xs font-bold truncate max-w-[150px]">{msg.fileName || "Dokumen Lampiran"}</span>
+                      <span className="text-xs font-bold truncate max-w-[150px]">{msg.fileName || "Dokumen PDF"}</span>
                       <a href={msg.imageUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] underline opacity-80 hover:opacity-100 flex items-center gap-1">
                         Lihat Dokumen <Download className="w-3 h-3"/>
                       </a>
