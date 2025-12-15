@@ -153,7 +153,7 @@ export default function NewAssignmentPage() {
       await updateDoc(chapterRef, { subchapters: updatedSubchapters });
 
       toast.success(status === 'published' ? "✅ Tugas diterbitkan!" : "💾 Disimpan sebagai draft");
-      router.push(`/class/${id}/activity`);
+      router.push(`/manage-class/${id}/activity`);
 
     } catch (error) {
       console.error("Error:", error);
