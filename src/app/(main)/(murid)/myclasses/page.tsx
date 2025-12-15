@@ -1,27 +1,26 @@
-"use client";
+'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, Search, FileText, Plus } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Bell, Search, FileText, Plus } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
 
 // Firebase
-import { auth, db } from "@/lib/firebase";
-import { onAuthStateChanged, User } from "firebase/auth";
+import { auth, db } from '@/lib/firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import {
-  Timestamp,
   addDoc,
   collection,
   doc,
   getDoc,
   getDocs,
   query,
-  where,
   serverTimestamp,
-} from "firebase/firestore";
+  where,
+} from 'firebase/firestore';
 
 type Attachment = { name: string; url: string };
-type Status = "On Going" | "Submitted" | "Graded";
+type Status = 'On Going' | 'Submitted' | 'Graded';
 
 type Assignment = {
   id: string;
@@ -32,10 +31,10 @@ type Assignment = {
   instructions: string;
   attachments: Attachment[];
   submissionStatusLabel: string;
-  timeRemaining: string;
+  timeRemaining: string; // dipakai sebagai Finished On (kalau ada submission)
   primaryActionLabel: string;
 
-  // internal fields (not for styling; only for logic)
+  // internal fields (logic only)
   _status: Status;
   _classId: string;
   _assignmentId: string;
@@ -43,13 +42,16 @@ type Assignment = {
   _publishedAt?: Date | null;
   _submittedAt?: Date | null;
   _submissionId?: string | null;
+
+  // deadline auto move
+  _autoSubmitted?: boolean;
 };
 
 type ClassCard = {
   id: string;
   title: string;
   teacher: string;
-  theme: "blue" | "purple" | "yellow";
+  theme: 'blue' | 'purple' | 'yellow';
   imageUrl?: string | null;
 };
 
@@ -88,7 +90,7 @@ type ChapterDoc = {
 type SubmissionDoc = {
   assignmentId: string;
   studentId: string;
-  status: string; // "SUBMITTED" / "GRADED" / etc
+  status: string; // "SUBMITTED" / "GRADED" / dll
   fileName?: string;
   fileUrl?: string;
   submittedAt?: any;
@@ -97,10 +99,8 @@ type SubmissionDoc = {
 function toDateSafe(v: any): Date | null {
   if (!v) return null;
   if (v instanceof Date) return v;
-  // Firestore Timestamp
-  if (typeof v?.toDate === "function") return v.toDate();
-  // ISO string
-  if (typeof v === "string") {
+  if (typeof v?.toDate === 'function') return v.toDate(); // Firestore Timestamp
+  if (typeof v === 'string') {
     const d = new Date(v);
     return Number.isNaN(d.getTime()) ? null : d;
   }
@@ -108,32 +108,32 @@ function toDateSafe(v: any): Date | null {
 }
 
 function fmtDateTime(d: Date | null): string {
-  if (!d) return "-";
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+  if (!d) return '-';
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(d);
 }
 
 function fmtPublished(d: Date | null): string {
-  if (!d) return "Published on -";
+  if (!d) return 'Published on -';
   return `Published on ${fmtDateTime(d)}`;
 }
 
 function fmtDeadline(d: Date | null): string {
-  if (!d) return "Deadline on -";
+  if (!d) return 'Deadline on -';
   return `Deadline on ${fmtDateTime(d)}`;
 }
 
 function timeRemaining(deadline: Date | null): string {
-  if (!deadline) return "-";
+  if (!deadline) return '-';
   const now = new Date();
   const ms = deadline.getTime() - now.getTime();
-  if (Number.isNaN(ms)) return "-";
-  if (ms <= 0) return "0 days 0 hours 0 mins";
+  if (Number.isNaN(ms)) return '-';
+  if (ms <= 0) return '0 days 0 hours 0 mins';
 
   const totalMins = Math.floor(ms / (1000 * 60));
   const days = Math.floor(totalMins / (60 * 24));
@@ -142,23 +142,22 @@ function timeRemaining(deadline: Date | null): string {
   return `${days} days ${hours} hours ${mins} mins`;
 }
 
-function mapThemeByIndex(i: number): "blue" | "purple" | "yellow" {
-  const themes: Array<"blue" | "purple" | "yellow"> = ["blue", "purple", "yellow"];
+function mapThemeByIndex(i: number): 'blue' | 'purple' | 'yellow' {
+  const themes: Array<'blue' | 'purple' | 'yellow'> = ['blue', 'purple', 'yellow'];
   return themes[i % themes.length];
 }
 
 function gradingStatusLabel(status: Status): string {
-  if (status === "On Going") return "No Attempt";
-  if (status === "Submitted") return "Not Graded";
-  return "Graded";
+  if (status === 'On Going') return 'No Attempt';
+  if (status === 'Submitted') return 'Not Graded';
+  return 'Graded';
 }
 
 function inferStatusFromSubmission(sub: SubmissionDoc | null): Status {
-  if (!sub) return "On Going";
-  const s = (sub.status || "").toUpperCase();
-  // treat anything explicitly graded as Graded
-  if (s.includes("GRADED") || s.includes("SCORED") || s.includes("DONE")) return "Graded";
-  return "Submitted";
+  if (!sub) return 'On Going';
+  const s = (sub.status || '').toUpperCase();
+  if (s.includes('GRADED') || s.includes('SCORED') || s.includes('DONE')) return 'Graded';
+  return 'Submitted';
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -167,17 +166,48 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+async function uploadToCloudinaryRaw(file: File): Promise<{ secureUrl: string }> {
+  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+  if (!cloudName) throw new Error('NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME belum diset.');
+  if (!uploadPreset) throw new Error('NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET belum diset.');
+
+  const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/raw/upload`;
+
+  const form = new FormData();
+  form.append('file', file);
+  form.append('upload_preset', uploadPreset);
+  // optional: keep original filename
+  form.append('filename_override', file.name);
+
+  const res = await fetch(endpoint, { method: 'POST', body: form });
+  if (!res.ok) {
+    let msg = `Upload gagal (${res.status}).`;
+    try {
+      const j = await res.json();
+      msg = j?.error?.message || msg;
+    } catch {}
+    throw new Error(msg);
+  }
+
+  const data = await res.json();
+  const secureUrl = data?.secure_url as string | undefined;
+  if (!secureUrl) throw new Error('Cloudinary tidak mengembalikan secure_url.');
+  return { secureUrl };
+}
+
 export default function MyAssignmentsHardcodedPage() {
   const router = useRouter();
 
-  const [filter, setFilter] = useState<Status>("On Going");
-  const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [filter, setFilter] = useState<Status>('On Going');
+  const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string>('');
 
   // data from Firebase
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [studentName, setStudentName] = useState<string>("");
+  const [studentName, setStudentName] = useState<string>('');
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [classes, setClasses] = useState<ClassCard[]>([]);
 
@@ -185,50 +215,50 @@ export default function MyAssignmentsHardcodedPage() {
   const [showUploader, setShowUploader] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadErr, setUploadErr] = useState<string>("");
+  const [uploadErr, setUploadErr] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setCurrentUser(u);
       setLoading(true);
-      setUploadErr("");
+      setUploadErr('');
       setShowUploader(false);
       setUploadFile(null);
 
       try {
         if (!u) {
-          setStudentName("");
+          setStudentName('');
           setAssignments([]);
           setClasses([]);
-          setSelectedId("");
+          setSelectedId('');
           return;
         }
 
         // 1) read user doc to know joined classes
-        const userRef = doc(db, "users", u.uid);
+        const userRef = doc(db, 'users', u.uid);
         const userSnap = await getDoc(userRef);
         const userData = (userSnap.exists() ? (userSnap.data() as UserDoc) : null) || null;
         const joinedClassIds = userData?.daftarKelas || [];
-        setStudentName(userData?.nama || u.displayName || "");
+        setStudentName(userData?.nama || u.displayName || '');
 
         if (!joinedClassIds.length) {
           setAssignments([]);
           setClasses([]);
-          setSelectedId("");
+          setSelectedId('');
           return;
         }
 
         // 2) fetch class docs
         const classDocs = await Promise.all(
           joinedClassIds.map(async (classId) => {
-            const cRef = doc(db, "classes", classId);
+            const cRef = doc(db, 'classes', classId);
             const cSnap = await getDoc(cRef);
             const cData = (cSnap.exists() ? (cSnap.data() as ClassDoc) : null) || null;
             return {
               id: classId,
-              title: cData?.name || "Untitled Class",
-              teacher: cData?.teacherName || "-",
+              title: cData?.name || 'Untitled Class',
+              teacher: cData?.teacherName || '-',
               imageUrl: cData?.imageUrl || null,
             };
           })
@@ -257,7 +287,7 @@ export default function MyAssignmentsHardcodedPage() {
         }> = [];
 
         for (const c of classDocs) {
-          const chaptersRef = collection(db, "classes", c.id, "chapters");
+          const chaptersRef = collection(db, 'classes', c.id, 'chapters');
           const chaptersSnap = await getDocs(chaptersRef);
 
           chaptersSnap.forEach((ch) => {
@@ -266,8 +296,8 @@ export default function MyAssignmentsHardcodedPage() {
             subs.forEach((subchapter) => {
               const asgArr = subchapter?.assignments || [];
               asgArr.forEach((asg) => {
-                const aid = asg?.id || "";
-                const title = asg?.title || "Untitled Assignment";
+                const aid = asg?.id || '';
+                const title = asg?.title || 'Untitled Assignment';
                 if (!aid) return;
 
                 flat.push({
@@ -275,11 +305,11 @@ export default function MyAssignmentsHardcodedPage() {
                   className: c.title,
                   assignmentId: aid,
                   title,
-                  description: asg?.description || "",
+                  description: asg?.description || '',
                   publishedAt: toDateSafe(asg?.publishedAt) || toDateSafe(asg?.createdAt),
                   deadlineAt: toDateSafe(asg?.deadline),
-                  questionFileUrl: asg?.questionFileUrl || "",
-                  rubricFileUrl: asg?.rubricFileUrl || "",
+                  questionFileUrl: asg?.questionFileUrl || '',
+                  rubricFileUrl: asg?.rubricFileUrl || '',
                 });
               });
             });
@@ -293,9 +323,9 @@ export default function MyAssignmentsHardcodedPage() {
         // Firestore "in" supports up to 10 values; do chunking.
         for (const ids of chunk(assignmentIds, 10)) {
           const qSub = query(
-            collection(db, "submissions"),
-            where("studentId", "==", u.uid),
-            where("assignmentId", "in", ids)
+            collection(db, 'submissions'),
+            where('studentId', '==', u.uid),
+            where('assignmentId', 'in', ids)
           );
           const subSnap = await getDocs(qSub);
           subSnap.forEach((d) => {
@@ -304,28 +334,41 @@ export default function MyAssignmentsHardcodedPage() {
         }
 
         // 5) build UI assignment list (sorted by nearest deadline first)
+        const now = new Date();
+
         const vm: Assignment[] = flat
           .map((a) => {
             const hit = submissionByAssignmentId.get(a.assignmentId) || null;
             const sub = hit?.sub || null;
-            const status = inferStatusFromSubmission(sub);
+
+            let status = inferStatusFromSubmission(sub);
             const submittedAt = toDateSafe(sub?.submittedAt) || null;
 
+            // RULE: if deadline passed AND no submission => treat as Submitted (auto), fileUrl/fileName empty.
+            const isOverdue = !!(a.deadlineAt && a.deadlineAt.getTime() <= now.getTime());
+            const autoSubmitted = status === 'On Going' && !sub && isOverdue;
+            if (autoSubmitted) status = 'Submitted';
+
             const attachments: Attachment[] = [];
-            if (a.questionFileUrl) attachments.push({ name: "Soal.pdf", url: a.questionFileUrl });
-            if (a.rubricFileUrl) attachments.push({ name: "Rubrik.pdf", url: a.rubricFileUrl });
+            if (a.questionFileUrl) attachments.push({ name: 'Soal.pdf', url: a.questionFileUrl });
+            if (a.rubricFileUrl) attachments.push({ name: 'Rubrik.pdf', url: a.rubricFileUrl });
 
             return {
-              id: a.assignmentId, // keep stable to match submissionId mapping
+              id: a.assignmentId,
               tag: a.className,
               title: a.title,
               publishedAt: fmtPublished(a.publishedAt),
               deadlineText: fmtDeadline(a.deadlineAt),
-              instructions: a.description || "-",
+              instructions: a.description || '-',
               attachments,
               submissionStatusLabel: gradingStatusLabel(status),
-              timeRemaining: status === "On Going" ? timeRemaining(a.deadlineAt) : fmtDateTime(submittedAt),
-              primaryActionLabel: "Add Submission",
+              timeRemaining:
+                status === 'On Going'
+                  ? timeRemaining(a.deadlineAt)
+                  : submittedAt
+                  ? fmtDateTime(submittedAt)
+                  : '-', // auto-submitted: no finished-on
+              primaryActionLabel: 'Add Submission',
 
               _status: status,
               _classId: a.classId,
@@ -334,6 +377,7 @@ export default function MyAssignmentsHardcodedPage() {
               _publishedAt: a.publishedAt,
               _submittedAt: submittedAt,
               _submissionId: hit?.docId || null,
+              _autoSubmitted: autoSubmitted,
             };
           })
           .sort((x, y) => {
@@ -343,12 +387,6 @@ export default function MyAssignmentsHardcodedPage() {
           });
 
         setAssignments(vm);
-
-        // default selection
-        setSelectedId((prev) => {
-          if (prev && vm.some((x) => x.id === prev)) return prev;
-          return vm[0]?.id || "";
-        });
       } finally {
         setLoading(false);
       }
@@ -362,130 +400,106 @@ export default function MyAssignmentsHardcodedPage() {
     return base.filter((a) => a._status === filter);
   }, [assignments, filter, search]);
 
+  // IMPORTANT: selected must be derived from filtered (not global assignments)
   const selected = useMemo(() => {
     if (!filtered.length) return null;
     return filtered.find((a) => a.id === selectedId) || filtered[0];
   }, [filtered, selectedId]);
 
-  // keep selectedId valid when filter/search changes
+  // When filter/search changes, if no item => clear detail
   useEffect(() => {
     if (!filtered.length) {
-      setSelectedId("");
+      setSelectedId('');
       setShowUploader(false);
       setUploadFile(null);
-      setUploadErr("");
+      setUploadErr('');
       return;
     }
     if (selectedId && filtered.some((x) => x.id === selectedId)) return;
-    setSelectedId(filtered[0]?.id || "");
-    // also reset uploader state
+    setSelectedId(filtered[0]?.id || '');
     setShowUploader(false);
     setUploadFile(null);
-    setUploadErr("");
-  }, [filtered, selectedId]);
+    setUploadErr('');
+  }, [filter, search, filtered.length]); // keep tight
 
   async function handleSubmitFile() {
     if (!currentUser || !selected) return;
-    if (selected._status !== "On Going") return;
+
+    // only ongoing AND not overdue auto-submitted
+    if (selected._status !== 'On Going') return;
+    if (selected._deadlineAt && selected._deadlineAt.getTime() <= Date.now()) {
+      setUploadErr('Deadline sudah lewat. Tugas otomatis masuk Submitted.');
+      return;
+    }
+
     if (!uploadFile) {
-      setUploadErr("Pilih file terlebih dahulu.");
-      return;
-    }
-
-    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-    const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
-
-    if (!cloudName) {
-      setUploadErr("NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME belum diset.");
-      return;
-    }
-    if (!uploadPreset) {
-      setUploadErr("NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET belum diset (wajib untuk unsigned upload).");
+      setUploadErr('Pilih file terlebih dahulu.');
       return;
     }
 
     setUploading(true);
-    setUploadErr("");
+    setUploadErr('');
 
     try {
-      // Upload to Cloudinary (resource type: raw), then create submission doc in Firestore.
-      const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/raw/upload`;
+      // Upload to Cloudinary RAW
+      const { secureUrl } = await uploadToCloudinaryRaw(uploadFile);
 
-      const form = new FormData();
-      form.append("file", uploadFile);
-      form.append("upload_preset", uploadPreset);
-      // optional: keep things organized
-      form.append("folder", `submissions/${currentUser.uid}/${selected._assignmentId}`);
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        body: form,
-      });
-
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        throw new Error(`Cloudinary upload gagal (${res.status}). ${errText}`);
-      }
-
-      const json: any = await res.json();
-      const fileUrl: string = json?.secure_url || json?.url || "";
-      if (!fileUrl) throw new Error("Cloudinary tidak mengembalikan URL file.");
-
-      await addDoc(collection(db, "submissions"), {
+      await addDoc(collection(db, 'submissions'), {
         assignmentId: selected._assignmentId,
         studentId: currentUser.uid,
-        studentName: studentName || currentUser.displayName || "",
-        status: "SUBMITTED",
+        studentName: studentName || currentUser.displayName || '',
+        status: 'SUBMITTED',
         fileName: uploadFile.name,
-        fileUrl,
+        fileUrl: secureUrl,
         submittedAt: serverTimestamp(),
         classId: selected._classId,
       });
 
       // optimistic UI: mark as submitted
+      const localSubmittedAt = new Date();
       setAssignments((prev) =>
         prev.map((a) => {
           if (a._assignmentId !== selected._assignmentId) return a;
-          const submittedAt = new Date();
           return {
             ...a,
-            _status: "Submitted",
-            _submittedAt: submittedAt,
-            submissionStatusLabel: gradingStatusLabel("Submitted"),
-            timeRemaining: fmtDateTime(submittedAt),
+            _status: 'Submitted',
+            _submittedAt: localSubmittedAt,
+            submissionStatusLabel: gradingStatusLabel('Submitted'),
+            timeRemaining: fmtDateTime(localSubmittedAt),
           };
         })
       );
 
       setShowUploader(false);
       setUploadFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (e: any) {
-      setUploadErr(e?.message || "Gagal submit.");
+      setUploadErr(e?.message || 'Gagal submit.');
     } finally {
       setUploading(false);
     }
   }
+
   const COLOR = {
-    pageBg: "bg-[#F8F9FC]",
-    shadowSoft: "shadow-[0_18px_40px_rgba(0,0,0,0.08)]",
-    heroGrad: "bg-gradient-to-r from-[#B8B6FF] to-[#3D5AFE]",
-    olive: { active: "bg-[#80711A]", idle: "bg-[#B7A21F]" },
-    activeRow: "bg-[#4B67F6]",
-    hoverRow: "hover:bg-[#EEF0F6]",
+    pageBg: 'bg-[#F8F9FC]',
+    shadowSoft: 'shadow-[0_18px_40px_rgba(0,0,0,0.08)]',
+    heroGrad: 'bg-gradient-to-r from-[#B8B6FF] to-[#3D5AFE]',
+    olive: { active: 'bg-[#80711A]', idle: 'bg-[#B7A21F]' },
+    activeRow: 'bg-[#4B67F6]',
+    hoverRow: 'hover:bg-[#EEF0F6]',
   };
 
-  const PANEL_H = "h-[520px]";
+  const PANEL_H = 'h-[520px]';
 
   return (
-    <div className={cn("min-h-screen", COLOR.pageBg)}>
+    <div className={cn('min-h-screen', COLOR.pageBg)}>
       <main className="mx-20 pt-10 pb-16">
         {/* HERO + SEARCH */}
         <div className="flex items-center justify-between gap-10">
           <h1
             className={cn(
-              "text-[54px] font-extrabold leading-none tracking-[-0.02em]",
-              "text-transparent bg-clip-text",
+              'text-[54px] font-extrabold leading-none tracking-[-0.02em]',
+              'text-transparent bg-clip-text',
               COLOR.heroGrad
             )}
           >
@@ -493,7 +507,7 @@ export default function MyAssignmentsHardcodedPage() {
           </h1>
 
           <div className="flex items-center gap-5">
-            <div className={cn("relative w-[460px] h-[44px] rounded-full bg-white", COLOR.shadowSoft)}>
+            <div className={cn('relative w-[460px] h-[44px] rounded-full bg-white', COLOR.shadowSoft)}>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -506,7 +520,7 @@ export default function MyAssignmentsHardcodedPage() {
             <button
               type="button"
               aria-label="notifications"
-              className={cn("w-[44px] h-[44px] rounded-full bg-white flex items-center justify-center", COLOR.shadowSoft)}
+              className={cn('w-[44px] h-[44px] rounded-full bg-white flex items-center justify-center', COLOR.shadowSoft)}
             >
               <Bell className="w-[20px] h-[20px] text-[#3D5AFE]" />
             </button>
@@ -518,15 +532,15 @@ export default function MyAssignmentsHardcodedPage() {
           <h2 className="text-[30px] font-extrabold text-black">My Assignments</h2>
 
           <div className="flex items-center gap-3">
-            {(["On Going", "Submitted", "Graded"] as const).map((s) => (
+            {(['On Going', 'Submitted', 'Graded'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setFilter(s)}
                 className={cn(
-                  "h-[30px] px-5 rounded-full text-[12px] font-extrabold text-white transition",
+                  'h-[30px] px-5 rounded-full text-[12px] font-extrabold text-white transition',
                   filter === s
-                    ? cn(COLOR.olive.active, "shadow-[0_10px_22px_rgba(128,113,26,0.35)]")
-                    : cn(COLOR.olive.idle, "hover:brightness-95")
+                    ? cn(COLOR.olive.active, 'shadow-[0_10px_22px_rgba(128,113,26,0.35)]')
+                    : cn(COLOR.olive.idle, 'hover:brightness-95')
                 )}
                 type="button"
               >
@@ -539,7 +553,7 @@ export default function MyAssignmentsHardcodedPage() {
         {/* ASSIGNMENTS GRID */}
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-10 items-start">
           {/* LEFT LIST (fixed height) */}
-          <div className={cn("bg-white overflow-hidden", COLOR.shadowSoft, PANEL_H)}>
+          <div className={cn('bg-white overflow-hidden', COLOR.shadowSoft, PANEL_H)}>
             <div className="h-full overflow-auto">
               {loading ? (
                 <div className="p-5 text-[12px] text-[#6B7280] font-medium">Loading...</div>
@@ -555,32 +569,32 @@ export default function MyAssignmentsHardcodedPage() {
                         setSelectedId(a.id);
                         setShowUploader(false);
                         setUploadFile(null);
-                        setUploadErr("");
+                        setUploadErr('');
                       }}
                       type="button"
                       className={cn(
-                        "w-full text-left px-5 py-4 transition-colors",
-                        active ? COLOR.activeRow : "bg-white",
+                        'w-full text-left px-5 py-4 transition-colors',
+                        active ? COLOR.activeRow : 'bg-white',
                         !active && COLOR.hoverRow,
-                        !isLast && "border-b border-[#E6E7EA]"
+                        !isLast && 'border-b border-[#E6E7EA]'
                       )}
                     >
                       <div className="mb-3">
                         <span
                           className={cn(
-                            "inline-flex items-center px-3 py-1 rounded-[8px] text-[10px] font-extrabold",
-                            active ? "bg-[#DDE6FF] text-[#3D5AFE]" : "bg-[#3D5AFE] text-white"
+                            'inline-flex items-center px-3 py-1 rounded-[8px] text-[10px] font-extrabold',
+                            active ? 'bg-[#DDE6FF] text-[#3D5AFE]' : 'bg-[#3D5AFE] text-white'
                           )}
                         >
                           {a.tag}
                         </span>
                       </div>
 
-                      <div className={cn("text-[14px] font-extrabold leading-snug", active ? "text-white" : "text-[#2F2F2F]")}>
+                      <div className={cn('text-[14px] font-extrabold leading-snug', active ? 'text-white' : 'text-[#2F2F2F]')}>
                         {a.title}
                       </div>
 
-                      <div className={cn("mt-1 text-[10px] font-medium", active ? "text-[#E8ECFF]" : "text-[#9CA3AF]")}>
+                      <div className={cn('mt-1 text-[10px] font-medium', active ? 'text-[#E8ECFF]' : 'text-[#9CA3AF]')}>
                         {a.publishedAt}
                       </div>
                     </button>
@@ -593,9 +607,9 @@ export default function MyAssignmentsHardcodedPage() {
           </div>
 
           {/* RIGHT DETAIL (fixed height, scroll body if overflow) */}
-          <div className={cn("bg-white", COLOR.shadowSoft, PANEL_H, "flex flex-col")}>
+          <div className={cn('bg-white', COLOR.shadowSoft, PANEL_H, 'flex flex-col')}>
             {!selected ? (
-              <div className="p-10 text-[12px] text-[#6B7280] font-medium">Pilih tugas untuk melihat detail.</div>
+              <div className="p-10 text-[12px] text-[#6B7280] font-medium" />
             ) : (
               <>
                 {/* top padding area */}
@@ -639,14 +653,14 @@ export default function MyAssignmentsHardcodedPage() {
 
                         <div className="px-4 py-3 text-[12px] font-extrabold text-black">Finished On</div>
                         <div className="px-4 py-3 text-[12px] font-medium text-black">
-                          {selected._status === "On Going" ? "-" : fmtDateTime(selected._submittedAt || null)}
+                          {selected._status === 'On Going' ? '-' : fmtDateTime(selected._submittedAt || null)}
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* uploader UI only for ongoing */}
-                  {filter === "On Going" && selected._status === "On Going" && showUploader && (
+                  {/* uploader UI only for ongoing & before deadline */}
+                  {filter === 'On Going' && selected._status === 'On Going' && showUploader && (
                     <div className="mt-6">
                       <div className="w-full border border-[#D1D5DB] p-4">
                         <div className="text-[12px] font-extrabold text-black mb-3">Add Submission</div>
@@ -659,7 +673,7 @@ export default function MyAssignmentsHardcodedPage() {
                           onChange={(e) => {
                             const f = e.target.files?.[0] || null;
                             setUploadFile(f);
-                            setUploadErr("");
+                            setUploadErr('');
                           }}
                         />
 
@@ -671,9 +685,9 @@ export default function MyAssignmentsHardcodedPage() {
                             disabled={uploading}
                             onClick={handleSubmitFile}
                             className={cn(
-                              "h-[34px] rounded-[8px] px-5 text-[12px] font-bold text-white inline-flex items-center gap-3",
-                              uploading ? "bg-[#9AA8FF]" : "bg-[#3D5AFE] hover:bg-[#2F49E8]",
-                              "shadow-[0_14px_30px_rgba(61,90,254,0.25)]"
+                              'h-[34px] rounded-[8px] px-5 text-[12px] font-bold text-white inline-flex items-center gap-3',
+                              uploading ? 'bg-[#9AA8FF]' : 'bg-[#3D5AFE] hover:bg-[#2F49E8]',
+                              'shadow-[0_14px_30px_rgba(61,90,254,0.25)]'
                             )}
                           >
                             Submit
@@ -684,26 +698,32 @@ export default function MyAssignmentsHardcodedPage() {
                   )}
                 </div>
 
-                {/* fixed footer button: ONLY for ongoing */}
+                {/* fixed footer button: ONLY for ongoing & before deadline */}
                 <div className="px-10 pb-10 pt-2">
                   <div className="flex justify-center">
-                    {filter === "On Going" && selected._status === "On Going" && (
+                    {filter === 'On Going' && selected._status === 'On Going' && (
                       <button
                         type="button"
                         onClick={() => {
+                          // if deadline already passed, do not open uploader
+                          if (selected._deadlineAt && selected._deadlineAt.getTime() <= Date.now()) {
+                            setUploadErr('Deadline sudah lewat. Tugas otomatis masuk Submitted.');
+                            setShowUploader(false);
+                            return;
+                          }
                           setShowUploader((v) => !v);
-                          setUploadErr("");
+                          setUploadErr('');
                         }}
                         className={cn(
-                          "h-[34px] rounded-[8px] px-5 text-[12px] font-bold text-white inline-flex items-center gap-3",
-                          "bg-[#3D5AFE] hover:bg-[#2F49E8]",
-                          "shadow-[0_14px_30px_rgba(61,90,254,0.25)]"
+                          'h-[34px] rounded-[8px] px-5 text-[12px] font-bold text-white inline-flex items-center gap-3',
+                          'bg-[#3D5AFE] hover:bg-[#2F49E8]',
+                          'shadow-[0_14px_30px_rgba(61,90,254,0.25)]'
                         )}
                       >
                         <span className="w-[18px] h-[18px] rounded-full border border-white/80 flex items-center justify-center">
                           <Plus className="w-[12px] h-[12px]" />
                         </span>
-                        {showUploader ? "Close" : "Add Submission"}
+                        {showUploader ? 'Close' : 'Add Submission'}
                       </button>
                     )}
                   </div>
@@ -723,46 +743,76 @@ export default function MyAssignmentsHardcodedPage() {
             ) : (
               classes.map((c) => {
                 const titleColor =
-                  c.theme === "blue" ? "text-[#3D5AFE]" : c.theme === "purple" ? "text-[#6C63FF]" : "text-[#B08A00]";
+                  c.theme === 'blue' ? 'text-[#3D5AFE]' : c.theme === 'purple' ? 'text-[#6C63FF]' : 'text-[#B08A00]';
 
                 const btnClass =
-                  c.theme === "blue"
-                    ? "bg-[#4B67F6] text-white hover:bg-[#3F59E8]"
-                    : c.theme === "purple"
-                    ? "bg-[#6C63FF] text-white hover:bg-[#594FF2]"
-                    : "bg-[#FFE16A] text-[#5A4F14] hover:brightness-95";
+                  c.theme === 'blue'
+                    ? 'bg-[#4B67F6] text-white hover:bg-[#3F59E8]'
+                    : c.theme === 'purple'
+                    ? 'bg-[#6C63FF] text-white hover:bg-[#594FF2]'
+                    : 'bg-[#FFE16A] text-[#5A4F14] hover:brightness-95';
 
                 return (
                   <div
                     key={c.id}
                     className={cn(
-                      "bg-white rounded-[18px] text-center",
+                      'bg-white rounded-[18px] text-center',
                       COLOR.shadowSoft,
-                      "flex flex-col items-center",
-                      "w-full max-w-[320px]",
-                      "min-h-[350px]"
+                      'flex flex-col items-center',
+                      'w-full max-w-[320px]',
+                      'min-h-[350px]'
                     )}
                   >
                     <div className="w-full px-7 pt-7">
-                      <div className={cn("text-[20px] font-extrabold mb-1 whitespace-pre-line", titleColor)}>{c.title}</div>
+                      <div className={cn('text-[20px] font-extrabold mb-1 whitespace-pre-line', titleColor)}>{c.title}</div>
                       <div className="text-[11px] text-[#6B7280] font-semibold mb-6">{c.teacher}</div>
 
                       <div className="h-[150px] w-full flex items-center justify-center mb-6">
                         {c.imageUrl ? (
                           <div className="relative h-[150px] w-full">
+                            {/* Use plain img to avoid next/image domain config */}
                             <img src={c.imageUrl} alt={c.title} className="h-full w-full object-contain" />
                           </div>
                         ) : (
-                          // fallback: keep old SVG shape based on theme to preserve layout
                           <svg width="220" height="140" viewBox="0 0 220 140" fill="none">
-                            <circle cx="55" cy="60" r="8" fill={c.theme === "purple" ? "#6C63FF" : c.theme === "yellow" ? "#FFD54F" : "#3D5AFE"} opacity="0.9" />
-                            <circle cx="110" cy="40" r="8" fill={c.theme === "purple" ? "#6C63FF" : c.theme === "yellow" ? "#FFD54F" : "#3D5AFE"} opacity="0.9" />
-                            <circle cx="165" cy="60" r="8" fill={c.theme === "purple" ? "#6C63FF" : c.theme === "yellow" ? "#FFD54F" : "#3D5AFE"} opacity="0.9" />
-                            <circle cx="80" cy="105" r="8" fill={c.theme === "purple" ? "#6C63FF" : c.theme === "yellow" ? "#FFD54F" : "#3D5AFE"} opacity="0.9" />
-                            <circle cx="140" cy="105" r="8" fill={c.theme === "purple" ? "#6C63FF" : c.theme === "yellow" ? "#FFD54F" : "#3D5AFE"} opacity="0.9" />
+                            <circle
+                              cx="55"
+                              cy="60"
+                              r="8"
+                              fill={c.theme === 'purple' ? '#6C63FF' : c.theme === 'yellow' ? '#FFD54F' : '#3D5AFE'}
+                              opacity="0.9"
+                            />
+                            <circle
+                              cx="110"
+                              cy="40"
+                              r="8"
+                              fill={c.theme === 'purple' ? '#6C63FF' : c.theme === 'yellow' ? '#FFD54F' : '#3D5AFE'}
+                              opacity="0.9"
+                            />
+                            <circle
+                              cx="165"
+                              cy="60"
+                              r="8"
+                              fill={c.theme === 'purple' ? '#6C63FF' : c.theme === 'yellow' ? '#FFD54F' : '#3D5AFE'}
+                              opacity="0.9"
+                            />
+                            <circle
+                              cx="80"
+                              cy="105"
+                              r="8"
+                              fill={c.theme === 'purple' ? '#6C63FF' : c.theme === 'yellow' ? '#FFD54F' : '#3D5AFE'}
+                              opacity="0.9"
+                            />
+                            <circle
+                              cx="140"
+                              cy="105"
+                              r="8"
+                              fill={c.theme === 'purple' ? '#6C63FF' : c.theme === 'yellow' ? '#FFD54F' : '#3D5AFE'}
+                              opacity="0.9"
+                            />
                             <path
                               d="M55 60 L110 40 L165 60 L140 105 L80 105 L55 60 Z M55 60 L140 105 M165 60 L80 105"
-                              stroke={c.theme === "purple" ? "#6C63FF" : c.theme === "yellow" ? "#FFD54F" : "#3D5AFE"}
+                              stroke={c.theme === 'purple' ? '#6C63FF' : c.theme === 'yellow' ? '#FFD54F' : '#3D5AFE'}
                               strokeWidth="3"
                               opacity="0.45"
                             />
@@ -774,7 +824,7 @@ export default function MyAssignmentsHardcodedPage() {
                     <div className="mt-auto w-full px-7 pb-7">
                       <button
                         type="button"
-                        className={cn("w-full h-[44px] rounded-[10px] font-extrabold text-[13px]", btnClass)}
+                        className={cn('w-full h-[44px] rounded-[10px] font-extrabold text-[13px]', btnClass)}
                         onClick={() => router.push(`class/${c.id}`)}
                       >
                         Enter Class
