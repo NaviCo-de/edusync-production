@@ -20,11 +20,19 @@ import { toast } from "sonner";
 import { CustomIcon } from "@/components/ui/CustomIcon";
 import { AskLynxModal } from "@/app/(main)/(guru)/components/AskLynxModal";
 
+// =====================
+// [BARU] Assignment Type
+// =====================
+const ASSIGNMENT_TYPES = ["vision_essay", "vision_pg"] as const;
+type AssignmentType = (typeof ASSIGNMENT_TYPES)[number];
+
 // Validation Schema
 const assignmentSchema = z.object({
   title: z.string().min(3, "Judul minimal 3 karakter"),
   description: z.string().optional(),
   deadline: z.string().optional(),
+  // [BARU] type wajib, default di form: vision_essay
+  type: z.enum(ASSIGNMENT_TYPES),
 });
 
 type AssignmentFormValues = z.infer<typeof assignmentSchema>;
@@ -46,7 +54,7 @@ export default function NewAssignmentPage() {
 
   const [loading, setLoading] = useState(false);
   const [isLynxModalOpen, setIsLynxModalOpen] = useState(false); // State Modal
-  
+
   // [MODIFIKASI] State File sekarang menggunakan tipe FileData
   const [questionData, setQuestionData] = useState<FileData | null>(null);
   const [rubricData, setRubricData] = useState<FileData | null>(null);
@@ -57,6 +65,7 @@ export default function NewAssignmentPage() {
       title: "",
       description: "",
       deadline: "",
+      type: "vision_essay", // [BARU]
     },
   });
 
@@ -140,6 +149,10 @@ export default function NewAssignmentPage() {
                 deadline: data.deadline ? new Date(data.deadline).toISOString() : null,
                 questionFileUrl: finalQuestionUrl,
                 rubricFileUrl: finalRubricUrl, 
+                // =====================
+                // [BARU] type disimpan
+                // =====================
+                type: data.type, // "vision_essay" | "vision_pg"
                 status: status,
                 publishedAt: new Date().toISOString(),
                 createdAt: new Date().toISOString(),
@@ -153,7 +166,7 @@ export default function NewAssignmentPage() {
       await updateDoc(chapterRef, { subchapters: updatedSubchapters });
 
       toast.success(status === 'published' ? "✅ Tugas diterbitkan!" : "💾 Disimpan sebagai draft");
-      router.push(`/class/${id}/activity`);
+      router.push(`/manage-class/${id}/activity`);
 
     } catch (error) {
       console.error("Error:", error);
@@ -250,6 +263,24 @@ export default function NewAssignmentPage() {
               <Label className="text-base font-semibold">Set Deadline</Label>
               <Input variant="auth" type="date" {...form.register('deadline')} />
             </div>
+
+            {/* =====================
+                [BARU] Assignment Type
+               ===================== */}
+            <div className="space-y-2">
+              <Label className="text-base font-semibold">Assignment Type</Label>
+
+              <select
+                {...form.register('type')}
+                className="w-full h-14 rounded-xl border border-gray-200 bg-white px-4 text-sm font-medium text-gray-900 outline-none focus:ring-2 focus:ring-blue-500"
+                defaultValue="vision_essay"
+              >
+                <option value="vision_essay">Vision Essay</option>
+                <option value="vision_pg">Vision PG</option>
+              </select>
+
+              {form.formState.errors.type && <p className="text-red-500 text-sm">{form.formState.errors.type.message}</p>}
+            </div>
           </div>
 
           {/* KOLOM KANAN */}
@@ -266,7 +297,7 @@ export default function NewAssignmentPage() {
             <div className="space-y-3">
               <Label className="text-base font-semibold">Assignment Rubric</Label>
               {renderFileUpload(rubricData, 'rubric', "rubric-file-input")}
-              
+
               <div className="flex justify-end">
                 <button
                     type="button"

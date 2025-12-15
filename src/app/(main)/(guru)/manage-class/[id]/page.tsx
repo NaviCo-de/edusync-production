@@ -396,9 +396,10 @@ export default function ClassDetail() {
           <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 mb-6 transition-all animate-in fade-in slide-in-from-top-2">
             <h3 className="font-semibold text-lg text-gray-700 mb-4">New Announcement</h3>
             
-            <Input 
+            <Input
+              variant={"auth"}
               placeholder="Announcement's Title" 
-              className="mb-4 font-semibold text-lg border-none px-0 shadow-none focus-visible:ring-0 placeholder:text-gray-300"
+              className="mb-4 rounded-[8px]"
               value={postTitle}
               onChange={(e) => setPostTitle(e.target.value)}
             />
