@@ -133,8 +133,6 @@ export default function AssignmentReviewsPage() {
   const [assignmentDetail, setAssignmentDetail] = useState<AssignmentDetail | null>(null);
   const [submissions, setSubmissions] = useState<SubmissionData[]>([]);
   const [expandedDetailId, setExpandedDetailId] = useState<string | null>(null);
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [selectedFeedback, setSelectedFeedback] = useState<any>(null);
 
   useEffect(() => {
     if (!assignmentId) return;
@@ -253,11 +251,6 @@ export default function AssignmentReviewsPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const handleOpenFeedback = (submission: SubmissionData) => {
-    setSelectedFeedback(parseFeedback(submission.feedback));
-    setShowFeedbackModal(true);
   };
 
   if (loading) {
@@ -432,65 +425,168 @@ export default function AssignmentReviewsPage() {
               key={submission.id}
               className={cn("bg-white rounded-2xl p-8", COLOR.shadowSoft)}
             >
-              <div className="flex items-start gap-6 mb-6">
-                <img
-                  src={submission.studentPhoto}
-                  alt={submission.studentName}
-                  className="w-16 h-16 rounded-full object-cover"
-                />
-
-                <div className="flex-1">
-                  <h3 className="text-[18px] font-extrabold text-[#B08A00]">
-                    {submission.studentName}
-                  </h3>
-                  <p className="text-[12px] text-[#6B7280]">
-                    {submission.studentNIM}
-                  </p>
-                </div>
-
-                <ScoreBox score={submission.score} />
-              </div>
-
-              {/* SUBMISSION FILES */}
-              <div className="mb-6">
-                <h4 className="text-[14px] font-extrabold text-black mb-3">
-                  Submission
-                </h4>
-                <div className="space-y-2">
-                  {submission.files.map((file, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between bg-white px-4 py-3 rounded-sm hover:bg-[#E7E7E7] transition-colors border"
-                    >
-                      <div className="flex items-center gap-3">
-                        <img src="/pdf.png" alt="pdf" className="w-7 h-8" />
-                        <span className="text-[14px] font-medium">
-                          {file.name}
-                        </span>
-                      </div>
-                      <button onClick={() => handleDownload(file.url, file.name)}>
-                        <Download className="w-6 h-6 text-black" />
-                      </button>
+              {/* COLLAPSED VIEW */}
+              {expandedDetailId !== submission.id ? (
+                <div className="flex items-center justify-between gap-6">
+                  {/* LEFT: Profile */}
+                  <div className="flex items-center gap-4">
+                    <img
+                      src={submission.studentPhoto}
+                      alt={submission.studentName}
+                      className="w-16 h-16 rounded-full object-cover"
+                    />
+                    <div>
+                      <h3 className="text-[18px] font-extrabold text-[#B08A00]">
+                        {submission.studentName}
+                      </h3>
+                      <p className="text-[12px] text-[#6B7280]">
+                        {submission.studentNIM}
+                      </p>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
 
-              {/* ACTION BUTTONS */}
-              <div className="flex justify-center gap-3">
-                <Button
-                  onClick={() => router.push(`/profile/${submission.studentId}`)}
-                  className="bg-[#FFE16A] hover:bg-[#FFD54F] text-[#5A4F14] text-[14px] font-bold px-6 py-3 h-auto"
-                >
-                  Visit Profile
-                </Button>
-                <Button
-                  onClick={() => handleOpenFeedback(submission)}
-                  className="bg-[#3D5AFE] hover:bg-[#2F49E8] text-white text-[14px] font-bold px-6 py-3 h-auto"
-                >
-                  See Feedback
-                </Button>
-              </div>
+                  {/* CENTER: Buttons */}
+                  <div className="flex items-center gap-3">
+                    <Button
+                      onClick={() => router.push(`/profile/${submission.studentId}`)}
+                      className="bg-[#FFE16A] hover:bg-[#FFD54F] text-[#5A4F14] text-[14px] font-bold px-6 py-3 h-auto"
+                    >
+                      Visit Profile
+                    </Button>
+                    <Button
+                      onClick={() => setExpandedDetailId(submission.id)}
+                      className="bg-[#3D5AFE] hover:bg-[#2F49E8] text-white text-[14px] font-bold px-6 py-3 h-auto"
+                    >
+                      See Feedback
+                    </Button>
+                  </div>
+
+                  {/* RIGHT: Score */}
+                  <ScoreBox score={submission.score} />
+                </div>
+              ) : (
+                /* EXPANDED VIEW */
+                <>
+                  <div className="flex items-center justify-between gap-6 mb-6">
+                    {/* LEFT: Profile + Visit Profile Button */}
+                    <div className="flex items-center gap-4">
+                      <img
+                        src={submission.studentPhoto}
+                        alt={submission.studentName}
+                        className="w-16 h-16 rounded-full object-cover"
+                      />
+                      <div>
+                        <h3 className="text-[18px] font-extrabold text-[#B08A00]">
+                          {submission.studentName}
+                        </h3>
+                        <p className="text-[12px] text-[#6B7280]">
+                          {submission.studentNIM}
+                        </p>
+                      </div>
+                      <Button
+                        onClick={() => router.push(`/profile/${submission.studentId}`)}
+                        className="bg-[#FFE16A] hover:bg-[#FFD54F] text-[#5A4F14] text-[14px] font-bold px-6 py-3 h-auto ml-4"
+                      >
+                        Visit Profile
+                      </Button>
+                    </div>
+
+                    {/* RIGHT: Score */}
+                    <ScoreBox score={submission.score} />
+                  </div>
+
+                  {/* FEEDBACK SECTION */}
+                  <div className="mb-6">
+                    <div className="text-[16px] font-extrabold text-black mb-4">
+                      Feedback By <span style={{ color: COLOR.scoreBlue }}>Lynx</span>
+                    </div>
+
+                    {(() => {
+                      const feedback = parseFeedback(submission.feedback);
+                      return (
+                        <>
+                          <div className="space-y-2 mb-4">
+                            <div className="font-extrabold text-[14px] text-black flex items-center gap-2">
+                              ✍️ <span>{feedback.analysisTitle}</span>
+                            </div>
+                            <ul className="space-y-2 text-[13px] text-black">
+                              {feedback.analysisBullets.map((b: string | number | bigint | boolean | React.ReactElement<unknown, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | React.ReactPortal | Promise<string | number | bigint | boolean | React.ReactPortal | React.ReactElement<unknown, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | null | undefined> | null | undefined, i: React.Key | null | undefined) => (
+                                <li key={i} className="flex gap-3">
+                                  <span className="mt-[2px]">•</span>
+                                  <span className="leading-relaxed">{b}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="space-y-2 mb-4">
+                            <div className="font-extrabold text-[14px] text-black flex items-center gap-2">
+                              ⚠️ <span>{feedback.mistakesTitle}</span>
+                            </div>
+                            <ul className="space-y-2 text-[13px] text-black">
+                              {feedback.mistakesBullets.map((b: string | number | bigint | boolean | React.ReactElement<unknown, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | React.ReactPortal | Promise<string | number | bigint | boolean | React.ReactPortal | React.ReactElement<unknown, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | null | undefined> | null | undefined, i: React.Key | null | undefined) => (
+                                <li key={i} className="flex gap-3">
+                                  <span className="mt-[2px]">❌</span>
+                                  <span className="leading-relaxed">{b}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="font-extrabold text-[14px] text-black flex items-center gap-2">
+                              💡 <span>{feedback.fixTitle}</span>
+                            </div>
+                            <ul className="space-y-2 text-[13px] text-black">
+                              {feedback.fixBullets.map((b: string | number | bigint | boolean | React.ReactElement<unknown, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | React.ReactPortal | Promise<string | number | bigint | boolean | React.ReactPortal | React.ReactElement<unknown, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | null | undefined> | null | undefined, i: React.Key | null | undefined) => (
+                                <li key={i} className="flex gap-3">
+                                  <span className="mt-[2px]">•</span>
+                                  <span className="leading-relaxed">{b}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  {/* SUBMISSION FILES */}
+                  <div className="mb-6">
+                    <h4 className="text-[14px] font-extrabold text-black mb-3">
+                      Submission
+                    </h4>
+                    <div className="space-y-2">
+                      {submission.files.map((file, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between bg-white px-4 py-3 rounded-sm hover:bg-[#E7E7E7] transition-colors border"
+                        >
+                          <div className="flex items-center gap-3">
+                            <img src="/pdf.png" alt="pdf" className="w-7 h-8" />
+                            <span className="text-[14px] font-medium">
+                              {file.name}
+                            </span>
+                          </div>
+                          <button onClick={() => handleDownload(file.url, file.name)}>
+                            <Download className="w-6 h-6 text-black" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* CLOSE FEEDBACK BUTTON */}
+                  <div className="flex justify-center">
+                    <Button
+                      onClick={() => setExpandedDetailId(null)}
+                      className="bg-[#6B7280] hover:bg-[#4B5563] text-white text-[14px] font-bold px-6 py-3 h-auto"
+                    >
+                      Close Feedback
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
 
@@ -503,75 +599,6 @@ export default function AssignmentReviewsPage() {
           )}
         </div>
       </div>
-
-      {/* FEEDBACK MODAL */}
-      <Dialog open={showFeedbackModal} onOpenChange={setShowFeedbackModal}>
-        <DialogContent className="max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle className="text-[20px] font-extrabold text-black">
-              Feedback By <span style={{ color: COLOR.scoreBlue }}>Lynx</span>
-            </DialogTitle>
-          </DialogHeader>
-
-          {selectedFeedback && (
-            <div className="space-y-4 py-4 max-h-[60vh] overflow-auto">
-              {/* ANALISIS */}
-              <div>
-                <div className="font-extrabold text-[14px] text-black flex items-center gap-2 mb-2">
-                  ✍️ <span>{selectedFeedback.analysisTitle}</span>
-                </div>
-                <ul className="space-y-2 text-[13px] text-black">
-                  {selectedFeedback.analysisBullets.map((b: string, i: number) => (
-                    <li key={i} className="flex gap-3">
-                      <span className="mt-[2px]">•</span>
-                      <span className="leading-relaxed">{b}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* KESALAHAN */}
-              <div>
-                <div className="font-extrabold text-[14px] text-black flex items-center gap-2 mb-2">
-                  ⚠️ <span>{selectedFeedback.mistakesTitle}</span>
-                </div>
-                <ul className="space-y-2 text-[13px] text-black">
-                  {selectedFeedback.mistakesBullets.map((b: string, i: number) => (
-                    <li key={i} className="flex gap-3">
-                      <span className="mt-[2px]">❌</span>
-                      <span className="leading-relaxed">{b}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* REKOMENDASI */}
-              <div>
-                <div className="font-extrabold text-[14px] text-black flex items-center gap-2 mb-2">
-                  💡 <span>{selectedFeedback.fixTitle}</span>
-                </div>
-                <ul className="space-y-2 text-[13px] text-black">
-                  {selectedFeedback.fixBullets.map((b: string, i: number) => (
-                    <li key={i} className="flex gap-3">
-                      <span className="mt-[2px]">•</span>
-                      <span className="leading-relaxed">{b}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
-
-          <div className="flex justify-center pt-4">
-            <Button
-              onClick={() => setShowFeedbackModal(false)}
-              className="bg-[#6B7280] hover:bg-[#4B5563] text-white px-8 py-3 h-auto"
-            >
-              Close Feedback
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
