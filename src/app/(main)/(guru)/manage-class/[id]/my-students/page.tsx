@@ -123,40 +123,8 @@ export default function MyStudentsPage() {
           </div>
         </div>
 
-        {/* SCORE RECAP SECTION - Hardcoded */}
-        <div className="mb-12">
-          <h2 className="text-[32px] font-bold text-black mb-6">Score Recap</h2>
-          
-          <div className="bg-white rounded-[20px] p-8 shadow-sm flex justify-between items-center">
-            {/* Left Info */}
-            <div>
-              <h3 className="text-[24px] font-bold text-black mb-2">
-                TK2 Kalkulus 1:<br />Penerapan Integral
-              </h3>
-              <div className="flex items-center gap-8 mt-4">
-                <div>
-                  <p className="text-[#6C63FF] text-sm font-semibold">Total Submission</p>
-                  <p className="text-[#6C63FF] text-2xl font-bold mt-1">3 Students</p>
-                </div>
-              </div>
-              <Button 
-                className="mt-6 bg-[#6C63FF] hover:bg-[#5A52E0] text-white rounded-full px-8 py-3 font-semibold"
-                onClick={() => {/* Navigate to review page */}}
-              >
-                See The Review
-              </Button>
-            </div>
-
-            {/* Right Diagram Placeholder */}
-            <div className="w-[600px] h-[300px] bg-gray-100 rounded-xl flex items-center justify-center">
-              <span className="text-gray-400 text-sm font-medium">FRAME DIAGRAM</span>
-            </div>
-          </div>
-        </div>
-
         {/* LIST OF STUDENTS SECTION */}
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-[32px] font-bold text-black">List of Student</h2>
           <span className="text-[20px] font-bold text-[#B8A229]">
             {filteredStudents.length} Students
           </span>

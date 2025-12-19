@@ -1,9 +1,11 @@
+// src/app/(main)/(murid)/my-grades/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useUserProfile } from "@/lib/hooks/useUserProfile";
-import { db } from "@/lib/firebase";
+import React, { useMemo, useState, useEffect } from "react";
+import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Search, Bell, ChevronDown, ChevronUp, Clock } from "lucide-react";
+import { db, auth } from "@/lib/firebase";
 import { 
   collection, 
   query, 
@@ -11,378 +13,699 @@ import {
   getDocs, 
   doc, 
   getDoc,
-  Timestamp 
+  Timestamp,
+  updateDoc,
+  writeBatch
 } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 
-// UI Components
-import { Input } from "@/components/ui/input";
-import { Search, Bell, ChevronDown, ChevronUp, AlertCircle, CheckCircle, Clock } from "lucide-react";
-import { cn } from "@/lib/utils";
+// =====================
+// TYPES
+// =====================
+type SubjectTab = string;
 
-// --- 1. DEFINISI TIPE DATA (Sesuai Database) ---
+type GradeCardData = {
+  id: string;
+  subject: SubjectTab;
+  score: number;
+  title: string;
+  deadlineText: string;
+  expanded: boolean;
+  feedback: {
+    analysisTitle: string;
+    analysisBullets: string[];
+    mistakesTitle: string;
+    mistakesBullets: string[];
+    fixTitle: string;
+    fixBullets: string[];
+  };
+  table: {
+    gradingStatus: string;
+    finishedOn: string;
+  };
+};
 
-interface GradeItem {
-  id: string;           // ID Assignment
-  assignmentTitle: string;
-  className: string;    // Nama Kelas (Matematika, Biologi, dll)
-  classId: string;
-  score: number | null; // Nilai (null jika belum dinilai)
-  maxPoints: number;    // Nilai maksimal soal
-  status: "GRADED" | "SUBMITTED" | "LATE" | "MISSING" | "ON_GOING";
-  submittedAt: string | null; // Tanggal submit formatted
-  deadline: string | null;    // Deadline formatted
-  feedback: string | null;    // Feedback guru
+// =====================
+// TOKENS
+// =====================
+const TOK = {
+  pageBg: "#F8F9FC",
+  tabBlue: "#4E6AF6",
+  tabPurple: "#7649F6",
+  tabMustard: "#A7973B",
+  textGrey: "#6B7280",
+  iconGrey: "#9CA3AF",
+  border: "#E7E7E7",
+  tableBorder: "rgba(156,163,175,0.70)",
+  cardBg: "#FFFFFF",
+  scoreBoxBg: "#EEF1FF",
+  scoreBlue: "#4E6AF6",
+};
+
+const HERO_GRADIENT = "linear-gradient(90deg, #EEF1FF 0%, #C9D1FF 55%, #B6B4FF 100%)";
+const CANVAS_W = "";
+const PILL_SHADOW = "shadow-[0_14px_34px_rgba(0,0,0,0.10)]";
+const CARD_SHADOW = "shadow-[0_18px_44px_rgba(0,0,0,0.08)]";
+
+// Color mapping for class chips (loops every 3 classes)
+const CLASS_COLORS = [TOK.tabBlue, TOK.tabPurple, TOK.tabMustard];
+
+function TabButton({
+  label,
+  active,
+  onClick,
+  colorIndex,
+}: {
+  label: SubjectTab;
+  active: boolean;
+  onClick: () => void;
+  colorIndex: number;
+}) {
+  const color = CLASS_COLORS[colorIndex % 3];
+  const isMustard = colorIndex % 3 === 2;
+
+  if (isMustard) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          "h-[44px] px-7 rounded-[14px] text-[14px] font-extrabold",
+          "bg-white border transition hover:bg-[#FAFAFA]",
+          PILL_SHADOW,
+          active && "ring-2 ring-black/5"
+        )}
+        style={{ color: TOK.tabMustard, borderColor: TOK.border }}
+      >
+        {label}
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "h-[44px] px-7 rounded-[14px] text-[14px] font-extrabold text-white",
+        "transition hover:brightness-95",
+        PILL_SHADOW,
+        active && "ring-2 ring-black/5"
+      )}
+      style={{ backgroundColor: color }}
+    >
+      {label}
+    </button>
+  );
 }
 
-// --- 2. KOMPONEN KECIL (UI) ---
-
-const ScoreBox = ({ score, maxPoints, status }: { score: number | null, maxPoints: number, status: string }) => {
-  // Jika belum submit atau belum dinilai
-  if (score === null) {
-    const isSubmitted = status === "SUBMITTED" || status === "LATE";
-    return (
-      <div className={cn(
-        "w-[80px] h-[80px] md:w-[100px] md:h-[100px] rounded-[20px] flex flex-col justify-center items-center shrink-0 border-2",
-        isSubmitted ? "bg-blue-50 border-blue-100" : "bg-gray-50 border-gray-100"
-      )}>
-        <span className={cn(
-          "text-xs font-bold text-center px-2",
-          isSubmitted ? "text-blue-600" : "text-gray-400"
-        )}>
-          {isSubmitted ? "Dinilai..." : "No Score"}
-        </span>
-      </div>
-    );
-  }
-
-  // Logic Warna Nilai
-  // Hijau > 75, Kuning > 50, Merah < 50
-  const isGood = score >= 75;
-  const isAvg = score >= 50 && score < 75;
-  
+function ScoreBox({ score }: { score: number }) {
   return (
-    <div className={cn(
-      "w-[80px] h-[80px] md:w-[100px] md:h-[100px] rounded-[20px] flex flex-col justify-center items-center shrink-0 transition-all shadow-sm border",
-      isGood ? "bg-green-50 text-green-700 border-green-200" : 
-      isAvg ? "bg-yellow-50 text-yellow-700 border-yellow-200" : 
-      "bg-red-50 text-red-600 border-red-200"
-    )}>
-      <span className="text-3xl md:text-4xl font-bold tracking-tighter">{score}</span>
-      <span className="text-[10px] md:text-xs font-semibold mt-1 opacity-70">/{maxPoints}</span>
+    <div
+      className={cn(
+        "w-[92px] h-[92px] rounded-2xl shrink-0",
+        "flex flex-col items-center justify-center",
+        "shadow-[0_14px_34px_rgba(0,0,0,0.06)]"
+      )}
+      style={{ backgroundColor: TOK.scoreBoxBg }}
+    >
+      <div className="text-[42px] font-extrabold leading-none" style={{ color: TOK.scoreBlue }}>
+        {score}
+      </div>
+      <div className="mt-1 text-[11px] font-extrabold" style={{ color: "rgba(78,106,246,0.72)" }}>
+        Score
+      </div>
     </div>
   );
-};
+}
 
-const GradeCard = ({ grade }: { grade: GradeItem }) => {
-  const [isOpen, setIsOpen] = useState(false);
-
-  // Helper status color
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "GRADED": return "bg-green-100 text-green-700";
-      case "SUBMITTED": return "bg-blue-100 text-blue-700";
-      case "LATE": return "bg-orange-100 text-orange-700";
-      case "MISSING": return "bg-red-100 text-red-700";
-      default: return "bg-gray-100 text-gray-600";
-    }
-  };
-
+function FeedbackByLynx({ feedback }: { feedback: GradeCardData["feedback"] }) {
   return (
-    <div className="bg-white rounded-[20px] p-6 shadow-[0_4px_20px_rgba(0,0,0,0.02)] border border-gray-100 hover:shadow-md transition-all duration-300">
-      {/* HEADER KARTU (Selalu Terlihat) */}
-      <div 
-        className="flex items-start gap-4 md:gap-6 cursor-pointer"
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        {/* KIRI: Kotak Nilai */}
-        <ScoreBox score={grade.score} maxPoints={grade.maxPoints} status={grade.status} />
-
-        {/* TENGAH: Informasi Utama */}
-        <div className="flex-1 pt-1 min-w-0">
-          {/* Badge Kelas */}
-          <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase bg-gray-100 text-gray-500 mb-2">
-            {grade.className}
-          </span>
-          
-          <h3 className="text-xl md:text-2xl font-bold text-gray-900 line-clamp-1 truncate pr-4">
-            {grade.assignmentTitle}
-          </h3>
-          
-          <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
-            <Clock className="w-4 h-4" />
-            <span>Deadline: {grade.deadline || "No Deadline"}</span>
-          </div>
-          
-          {/* Preview Feedback (Muncul saat tertutup) */}
-          {!isOpen && grade.feedback && (
-            <p className="text-sm text-gray-400 mt-3 line-clamp-1">
-              <span className="text-blue-600 font-semibold">Feedback: </span>
-              {grade.feedback}
-            </p>
-          )}
-        </div>
-
-        {/* KANAN: Icon Toggle */}
-        <div className="pt-2 text-gray-400">
-          {isOpen ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
-        </div>
+    <div className="mt-6">
+      <div className="text-[16px] font-extrabold text-black mb-4">
+        Feedback By <span style={{ color: TOK.scoreBlue }}>Lynx</span>
       </div>
 
-      {/* BODY KARTU (Muncul saat dibuka/expanded) */}
-      <div className={cn(
-        "grid transition-[grid-template-rows] duration-300 ease-out",
-        isOpen ? "grid-rows-[1fr] mt-6 opacity-100" : "grid-rows-[0fr] mt-0 opacity-0"
-      )}>
-        <div className="overflow-hidden">
-          <div className="border-t border-gray-100 pt-6">
-            
-            {/* Feedback Section */}
-            <div className="mb-6">
-              <p className="font-semibold text-gray-800 mb-2 flex items-center gap-2">
-                 Feedback Guru
-                 {grade.feedback && <CheckCircle className="w-4 h-4 text-green-500" />}
-              </p>
-              <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-50">
-                <p className="text-gray-600 leading-relaxed text-sm md:text-base italic">
-                    {grade.feedback ? `"${grade.feedback}"` : "Belum ada feedback yang diberikan untuk tugas ini."}
-                </p>
+      <div className="space-y-2">
+        <div className="font-extrabold text-[14px] text-black flex items-center gap-2">
+          ✍️ <span>{feedback.analysisTitle}</span>
+        </div>
+        <ul className="space-y-2 text-[13px] text-black">
+          {feedback.analysisBullets.map((b, i) => (
+            <li key={i} className="flex gap-3">
+              <span className="mt-[2px]">•</span>
+              <span className="leading-relaxed">{b}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <div className="font-extrabold text-[14px] text-black flex items-center gap-2">
+          ⚠️ <span>{feedback.mistakesTitle}</span>
+        </div>
+        <ul className="space-y-2 text-[13px] text-black">
+          {feedback.mistakesBullets.map((b, i) => (
+            <li key={i} className="flex gap-3">
+              <span className="mt-[2px]">❌</span>
+              <span className="leading-relaxed">{b}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <div className="font-extrabold text-[14px] text-black flex items-center gap-2">
+          💡 <span>{feedback.fixTitle}</span>
+        </div>
+        <ul className="space-y-2 text-[13px] text-black">
+          {feedback.fixBullets.map((b, i) => (
+            <li key={i} className="flex gap-3">
+              <span className="mt-[2px]">•</span>
+              <span className="leading-relaxed">{b}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function GradeCard({ item, onToggle }: { item: GradeCardData; onToggle: (id: string) => void }) {
+  return (
+    <div className={cn("rounded-2xl", CARD_SHADOW)} style={{ backgroundColor: TOK.cardBg }}>
+      <div className="px-10 py-9">
+        <div className="flex items-start gap-8">
+          <ScoreBox score={item.score} />
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-6">
+              <div>
+                <div className="text-[20px] font-extrabold text-black leading-tight">{item.title}</div>
+                <div className="mt-2 text-[12px] font-medium flex items-center gap-2" style={{ color: TOK.textGrey }}>
+                  <Clock className="w-4 h-4" style={{ color: TOK.iconGrey }} />
+                  <span>{item.deadlineText}</span>
+                </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => onToggle(item.id)}
+                className="pt-1 text-gray-600 hover:text-gray-900"
+                aria-label="toggle"
+              >
+                {item.expanded ? <ChevronUp className="w-7 h-7" /> : <ChevronDown className="w-7 h-7" />}
+              </button>
             </div>
 
-            {/* Table Info Status */}
-            <div className="bg-gray-50 rounded-xl p-4 md:px-8 md:py-6">
-              <div className="flex justify-between items-center border-b border-gray-200 pb-3 mb-3">
-                <span className="font-bold text-gray-900 text-sm">Status Pengerjaan</span>
-                <span className={cn(
-                  "font-bold text-xs px-3 py-1 rounded-full uppercase tracking-wider",
-                  getStatusColor(grade.status)
-                )}>
-                  {grade.status.replace("_", " ")}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="font-bold text-gray-900 text-sm">Dikumpulkan Pada</span>
-                <span className="text-gray-600 text-sm font-medium">
-                    {grade.submittedAt || "-"}
-                </span>
-              </div>
-            </div>
+            {item.expanded ? (
+              <>
+                <FeedbackByLynx feedback={item.feedback} />
 
+                <div className="mt-8 border-t" style={{ borderColor: TOK.tableBorder }} />
+
+                <div className="mt-6">
+                  <div className="w-full border" style={{ borderColor: TOK.tableBorder }}>
+                    <div className="grid grid-cols-[220px_1fr]">
+                      <div
+                        className="border-b px-5 py-3 text-[13px] font-extrabold text-black"
+                        style={{ borderColor: TOK.tableBorder }}
+                      >
+                        Grading Status
+                      </div>
+                      <div
+                        className="border-b px-5 py-3 text-[13px] font-medium text-black"
+                        style={{ borderColor: TOK.tableBorder }}
+                      >
+                        {item.table.gradingStatus}
+                      </div>
+
+                      <div className="px-5 py-3 text-[13px] font-extrabold text-black">Finished On</div>
+                      <div className="px-5 py-3 text-[13px] font-medium text-black">{item.table.finishedOn}</div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : null}
           </div>
         </div>
       </div>
     </div>
   );
-};
-
-// --- 3. HALAMAN UTAMA ---
+}
 
 export default function MyGradesPage() {
-  const { user, loading: userLoading } = useUserProfile();
-  const router = useRouter();
-
-  // State
-  const [grades, setGrades] = useState<GradeItem[]>([]);
-  const [loadingData, setLoadingData] = useState(true);
-  const [activeFilter, setActiveFilter] = useState("Semua");
-  const [classFilters, setClassFilters] = useState<string[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [userClasses, setUserClasses] = useState<Array<{id: string, name: string}>>([]);
+  const [activeTab, setActiveTab] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [cards, setCards] = useState<GradeCardData[]>([]);
 
-  // FETCH DATA ENGINE
+  // Auth listener
   useEffect(() => {
-    const fetchData = async () => {
-      if (!user || !user.uid || !user.daftarKelas) {
-        setLoadingData(false);
-        return;
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setCurrentUser(user);
+        await loadUserClasses(user.uid);
       }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-      setLoadingData(true);
-      try {
-        // 1. Ambil Data Kelas (Untuk Nama Kelas & Filter)
-        const classMap: Record<string, string> = {}; // id -> nama
-        const classPromises = user.daftarKelas.map(async (classId) => {
-            const snap = await getDoc(doc(db, "classes", classId));
-            if (snap.exists()) {
-                const name = snap.data().name || snap.data().nama || "Kelas Tanpa Nama";
-                classMap[classId] = name;
-                return name;
-            }
-            return null;
-        });
+  // Load user's enrolled classes
+  const loadUserClasses = async (userId: string) => {
+    try {
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        const classIds = userData.daftarKelas || [];
         
-        const classNames = (await Promise.all(classPromises)).filter(Boolean) as string[];
-        setClassFilters(["Semua", ...classNames]);
-
-        // 2. Ambil Modules (Tugas)
-        // Kita butuh tau tugas apa saja yang ada untuk menampilkan "Missing" jika belum dikerjakan
-        const modulesPromises = user.daftarKelas.map(async (classId) => {
-             const q = query(
-                 collection(db, "modules"), 
-                 where("classId", "==", classId),
-                 where("type", "==", "assignment"),
-                 where("status", "==", "published")
-             );
-             const snap = await getDocs(q);
-             return snap.docs.map(d => ({ id: d.id, ...d.data(), classId }));
-        });
-        const allModules = (await Promise.all(modulesPromises)).flat();
-
-        // 3. Ambil Submissions (Jawaban User)
-        const qSub = query(collection(db, "submissions"), where("studentId", "==", user.uid));
-        const subSnap = await getDocs(qSub);
-        const mySubmissions = subSnap.docs.map(d => ({ ...d.data() as any, id: d.id }));
-
-        // 4. Merge Data (Modules + Submissions)
-        const mergedData: GradeItem[] = allModules.map((module: any) => {
-            const submission = mySubmissions.find(s => s.assignmentId === module.id);
-            
-            let status: GradeItem["status"] = "ON_GOING";
-            if (submission) {
-                status = submission.status || "SUBMITTED";
-            } else {
-                // Cek deadline untuk status MISSING
-                if (module.dueDate && new Date(module.dueDate) < new Date()) {
-                    status = "MISSING";
-                }
-            }
-
-            // Formatting Dates
-            const formatDate = (date: any) => {
-                if (!date) return null;
-                // Handle Firestore Timestamp or String
-                const d = date.toDate ? date.toDate() : new Date(date);
-                return d.toLocaleDateString("id-ID", { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-            };
-
-            return {
-                id: module.id,
-                assignmentTitle: module.title,
-                classId: module.classId,
-                className: classMap[module.classId] || "Unknown Class",
-                score: submission?.score ?? null,
-                maxPoints: module.points || 100,
-                status: status,
-                submittedAt: submission ? formatDate(submission.submittedAt) : null,
-                deadline: formatDate(module.dueDate),
-                feedback: submission?.feedback || null
-            };
-        });
-
-        // Sort: Graded first, then Submitted, then others. Within group by date.
-        mergedData.sort((a, b) => {
-            if (a.status === "GRADED" && b.status !== "GRADED") return -1;
-            if (a.status !== "GRADED" && b.status === "GRADED") return 1;
-            return 0; // Bisa tambahkan sort by date detail di sini
-        });
-
-        setGrades(mergedData);
-
-      } catch (error) {
-        console.error("Error fetching grades:", error);
-      } finally {
-        setLoadingData(false);
+        const classesData = await Promise.all(
+          classIds.map(async (classId: string) => {
+            const classRef = doc(db, "classes", classId);
+            const classSnap = await getDoc(classRef);
+            return classSnap.exists() 
+              ? { id: classId, name: classSnap.data().name || "Unknown Class" }
+              : null;
+          })
+        );
+        
+        const validClasses = classesData.filter(c => c !== null) as Array<{id: string, name: string}>;
+        setUserClasses(validClasses);
+        if (validClasses.length > 0) {
+          setActiveTab(validClasses[0].name);
+          await loadGradedAssignments(userId, validClasses[0].id);
+        }
       }
-    };
-
-    if (!userLoading) {
-        if (!user) router.push("/login");
-        else fetchData();
+    } catch (error) {
+      console.error("Error loading user classes:", error);
     }
-  }, [user, userLoading, router]);
-
-
-  // FILTERING LOGIC
-  const filteredGrades = grades.filter(grade => {
-      const matchFilter = activeFilter === "Semua" ? true : grade.className === activeFilter;
-      const matchSearch = grade.assignmentTitle.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchFilter && matchSearch;
-  });
-
-
-  // Helper Style Tab Filter (Sama seperti request sebelumnya)
-  const getFilterStyle = (index: number, isActive: boolean) => {
-    if (index === 0) { // Tombol Semua
-        return isActive 
-            ? "bg-gray-900 text-white shadow-md border-transparent" 
-            : "bg-white text-gray-600 hover:bg-gray-50 border border-transparent";
-    }
-    const colorPattern = (index - 1) % 3;
-    let style = "shadow-sm border-2 transition-all duration-200 ";
-    
-    if (colorPattern === 0) style += isActive ? "bg-white text-blue-600 border-blue-600" : "bg-white text-blue-600 border-transparent hover:shadow-md";
-    else if (colorPattern === 1) style += isActive ? "bg-yellow-400 text-black border-yellow-600" : "bg-yellow-400 text-black border-transparent hover:shadow-md";
-    else style += isActive ? "bg-purple-600 text-white border-purple-800" : "bg-purple-600 text-white border-transparent hover:shadow-md";
-    
-    return style;
   };
 
-  if (userLoading || loadingData) {
+  // Auto-submit and grade overdue assignments
+  const autoSubmitOverdueAssignments = async (userId: string, classId: string) => {
+    try {
+      const now = Timestamp.now();
+      
+      // Get all chapters in this class
+      const chaptersRef = collection(db, "classes", classId, "chapters");
+      const chaptersSnap = await getDocs(chaptersRef);
+      
+      const batch = writeBatch(db);
+      const assignmentsToGrade: any[] = [];
+
+      for (const chapterDoc of chaptersSnap.docs) {
+        const chapterData = chapterDoc.data();
+        const subchapters = chapterData.subchapters || [];
+        
+        for (const subchapter of subchapters) {
+          const assignments = subchapter.assignments || [];
+          
+          for (const assignment of assignments) {
+            // Check if deadline exists and has passed
+            const hasDeadline = assignment.deadline && assignment.deadline.toDate;
+            const isPastDeadline = hasDeadline && assignment.deadline.toDate() < now.toDate();
+            
+            if (isPastDeadline) {
+              // Check if submission exists
+              const submissionsRef = collection(db, "submissions");
+              const q = query(
+                submissionsRef,
+                where("assignmentId", "==", assignment.id),
+                where("studentId", "==", userId)
+              );
+              const submissionSnap = await getDocs(q);
+              
+              if (submissionSnap.empty) {
+                // Create late submission
+                const newSubmissionRef = doc(collection(db, "submissions"));
+                batch.set(newSubmissionRef, {
+                  assignmentId: assignment.id,
+                  studentId: userId,
+                  studentName: currentUser?.displayName || "Unknown",
+                  status: "LATE_SUBMITTED",
+                  submittedAt: now,
+                  fileName: "",
+                  fileUrl: "",
+                });
+                
+                assignmentsToGrade.push({
+                  submissionId: newSubmissionRef.id,
+                  assignment,
+                  answer: "",
+                  fileUrl: "",
+                });
+              } else {
+                // Check existing submissions that need grading
+                submissionSnap.forEach(subDoc => {
+                  const subData = subDoc.data();
+                  if (subData.status === "SUBMITTED" || subData.status === "LATE_SUBMITTED") {
+                    assignmentsToGrade.push({
+                      submissionId: subDoc.id,
+                      assignment,
+                      answer: subData.answer || "",
+                      fileUrl: subData.fileUrl || "",
+                    });
+                  }
+                });
+              }
+            }
+          }
+        }
+      }
+      
+      await batch.commit();
+      
+      // Grade all pending assignments
+      for (const item of assignmentsToGrade) {
+        await gradeAssignment(item.submissionId, item.assignment, item.answer, item.fileUrl);
+      }
+    } catch (error) {
+      console.error("Error auto-submitting overdue assignments:", error);
+    }
+  };
+
+  // Grade assignment using AI
+  const gradeAssignment = async (
+    submissionId: string, 
+    assignment: any, 
+    answer: string, 
+    fileUrl: string
+  ) => {
+    try {
+      const requestBody: any = {
+        assignment_id: assignment.id,
+        type: assignment.type,
+        rubric: assignment.rubricFileUrl || "",
+        submissions: [{
+          student_id: currentUser?.uid,
+          answer: answer,
+          file_url: fileUrl,
+        }]
+      };
+
+      if (assignment.questionFileUrl) {
+        if (assignment.questionFileUrl.endsWith('.pdf')) {
+          requestBody.question_pdf_url = assignment.questionFileUrl;
+        } else {
+          requestBody.question_image_url = assignment.questionFileUrl;
+        }
+      }
+
+      const response = await fetch("https://lynx-ai.up.railway.app/grade/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        throw new Error("Grading failed");
+      }
+
+      const result = await response.json();
+      const gradeResult = result.batch_result?.details?.[0]?.result;
+      
+      if (gradeResult) {
+        const parsedResult = typeof gradeResult === 'string' 
+          ? JSON.parse(gradeResult) 
+          : gradeResult;
+        
+        // Update submission with graded info
+        const submissionRef = doc(db, "submissions", submissionId);
+        await updateDoc(submissionRef, {
+          status: "GRADED",
+          graded_info: {
+            score: parsedResult.score || 0,
+            feedback: parsedResult.feedback || "",
+            correct_count: parsedResult.correct_count || 0,
+            graded_at: Timestamp.now(),
+          }
+        });
+      }
+    } catch (error) {
+      console.error("Error grading assignment:", error);
+    }
+  };
+
+  // Load graded assignments for active class
+  const loadGradedAssignments = async (userId: string, classId: string) => {
+    try {
+      // First auto-submit overdue assignments
+      await autoSubmitOverdueAssignments(userId, classId);
+      
+      // Then fetch all graded submissions
+      const submissionsRef = collection(db, "submissions");
+      const q = query(
+        submissionsRef,
+        where("studentId", "==", userId),
+        where("status", "==", "GRADED")
+      );
+      
+      const submissionsSnap = await getDocs(q);
+      const gradeCards: GradeCardData[] = [];
+      
+      // Get class name
+      const classRef = doc(db, "classes", classId);
+      const classSnap = await getDoc(classRef);
+      const className = classSnap.exists() ? classSnap.data().name : "Unknown";
+
+      for (const subDoc of submissionsSnap.docs) {
+        const subData = subDoc.data();
+        const gradedInfo = subData.graded_info;
+        
+        if (!gradedInfo) continue;
+
+        // Find assignment details
+        const assignmentDetails = await findAssignmentDetails(classId, subData.assignmentId);
+        
+        if (assignmentDetails) {
+          const feedback = parseFeedback(gradedInfo.feedback);
+          const deadlineDate = assignmentDetails.deadline?.toDate();
+          const submittedDate = subData.submittedAt?.toDate();
+          
+          gradeCards.push({
+            id: subDoc.id,
+            subject: className,
+            score: gradedInfo.score || 0,
+            title: assignmentDetails.title || "Untitled Assignment",
+            deadlineText: deadlineDate 
+              ? `Deadline on ${formatDate(deadlineDate)}`
+              : "No deadline",
+            expanded: false,
+            feedback,
+            table: {
+              gradingStatus: "Graded",
+              finishedOn: submittedDate 
+                ? formatDateTime(submittedDate)
+                : "Unknown",
+            }
+          });
+        }
+      }
+      
+      setCards(gradeCards);
+    } catch (error) {
+      console.error("Error loading graded assignments:", error);
+    }
+  };
+
+  // Find assignment details from class structure
+  const findAssignmentDetails = async (classId: string, assignmentId: string) => {
+    try {
+      const chaptersRef = collection(db, "classes", classId, "chapters");
+      const chaptersSnap = await getDocs(chaptersRef);
+      
+      for (const chapterDoc of chaptersSnap.docs) {
+        const chapterData = chapterDoc.data();
+        const subchapters = chapterData.subchapters || [];
+        
+        for (const subchapter of subchapters) {
+          const assignments = subchapter.assignments || [];
+          const found = assignments.find((a: any) => a.id === assignmentId);
+          if (found) return found;
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error("Error finding assignment:", error);
+      return null;
+    }
+  };
+
+  // Parse AI feedback into structured format
+  const parseFeedback = (feedbackText: string) => {
+    // Default structure if parsing fails
+    const defaultFeedback = {
+      analysisTitle: "Analisis Prosedural",
+      analysisBullets: [feedbackText || "Tidak ada feedback tersedia."],
+      mistakesTitle: "Kesalahan Umum yang Terdeteksi",
+      mistakesBullets: ["Tidak ada kesalahan yang terdeteksi."],
+      fixTitle: "Rekomendasi Perbaikan",
+      fixBullets: ["Pertahankan performa yang baik."],
+    };
+
+    if (!feedbackText) return defaultFeedback;
+
+    // Try to parse structured feedback
+    try {
+      const sections = feedbackText.split('\n\n');
+      const result: any = { ...defaultFeedback };
+      
+      sections.forEach(section => {
+        const lines = section.split('\n').filter(l => l.trim());
+        if (lines.length > 0) {
+          const title = lines[0];
+          const bullets = lines.slice(1).map(l => l.replace(/^[•\-\*]\s*/, '').trim());
+          
+          if (title.toLowerCase().includes('analisis')) {
+            result.analysisTitle = title;
+            result.analysisBullets = bullets;
+          } else if (title.toLowerCase().includes('kesalahan')) {
+            result.mistakesTitle = title;
+            result.mistakesBullets = bullets;
+          } else if (title.toLowerCase().includes('rekomendasi') || title.toLowerCase().includes('perbaikan')) {
+            result.fixTitle = title;
+            result.fixBullets = bullets;
+          }
+        }
+      });
+      
+      return result;
+    } catch {
+      return defaultFeedback;
+    }
+  };
+
+  // Format date helper
+  const formatDate = (date: Date) => {
+    return date.toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }) + ' - ' + date.toLocaleTimeString('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const formatDateTime = (date: Date) => {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }) + ', ' + date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
+
+  // Handle tab change
+  const handleTabChange = async (className: string) => {
+    setActiveTab(className);
+    const selectedClass = userClasses.find(c => c.name === className);
+    if (selectedClass && currentUser) {
+      await loadGradedAssignments(currentUser.uid, selectedClass.id);
+    }
+  };
+
+  // Filter cards
+  const filteredCards = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return cards
+      .filter((c) => c.subject === activeTab)
+      .filter((c) => (q ? c.title.toLowerCase().includes(q) : true));
+  }, [cards, activeTab, searchQuery]);
+
+  const toggleCard = (id: string) => {
+    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, expanded: !c.expanded } : c)));
+  };
+
+  if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-[#F8F9FC]">
-        <div className="flex flex-col items-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-gray-500 font-medium animate-pulse">Memuat laporan nilai...</p>
-        </div>
+      <div className="min-h-screen w-full flex items-center justify-center" style={{ backgroundColor: TOK.pageBg }}>
+        <div className="text-xl font-bold">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F9FC] w-full pb-20">
-      {/* 1. HEADER SECTION */}
-      <div className="px-6 md:px-12 pt-10 pb-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <h1 className="text-3xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-blue-600 via-blue-500 to-purple-600 bg-clip-text text-transparent leading-tight py-2">
-              My Grade Report
-            </h1>
-            <p className="text-gray-500">Pantau perkembangan nilai dan feedback tugasmu.</p>
-          </div>
-
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className="relative flex-1 md:w-[400px]">
-              <Input 
-                placeholder="Cari Tugas..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-6 rounded-full bg-white shadow-sm border-gray-100 text-sm w-full focus-visible:ring-blue-600 transition-shadow focus:shadow-md"
-              />
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-            </div>
-          </div>
-        </div>
-
-        {/* 2. FILTER TABS */}
-        <div className="mt-8 flex gap-3 overflow-x-auto pb-4 scrollbar-hide">
-          {classFilters.map((filter, index) => (
-            <button
-              key={`${filter}-${index}`}
-              onClick={() => setActiveFilter(filter)}
-              className={cn(
-                "px-5 py-2.5 rounded-xl font-bold text-sm whitespace-nowrap",
-                getFilterStyle(index, activeFilter === filter)
-              )}
+    <div className="min-h-screen w-full" style={{ backgroundColor: TOK.pageBg }}>
+      <div className={cn("mx-20 pb-24")}>
+        {/* HERO */}
+        <div className="pt-12">
+          <div className="flex items-start justify-between gap-10">
+            <h1
+              className={cn("text-[48px] font-extrabold leading-none", "bg-clip-text text-transparent")}
+              style={{
+                backgroundImage: HERO_GRADIENT,
+                backgroundSize: "100% 100%",
+                backgroundRepeat: "no-repeat",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+              }}
             >
-              {filter}
-            </button>
-          ))}
-        </div>
-      </div>
+              Let&rsquo;s See Your Progress Here!
+            </h1>
 
-      {/* 3. CONTENT LIST */}
-      <div className="px-6 md:px-12 py-2 space-y-5 max-w-7xl">
-        {filteredGrades.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[30px] border border-dashed border-gray-200">
-            <div className="bg-gray-50 p-4 rounded-full mb-4">
-                <AlertCircle className="w-8 h-8 text-gray-400" />
+            <div className="flex items-center gap-6 pt-2">
+              <div className="relative w-[520px]">
+                <Input
+                  placeholder="Search Material"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className={cn(
+                    "h-[50px] rounded-full bg-white border-0 ring-0 focus-visible:ring-0",
+                    "pl-6 pr-12 text-[14px] font-medium",
+                    PILL_SHADOW
+                  )}
+                />
+                <Search className="absolute right-5 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: TOK.textGrey }} />
+              </div>
+
+              <button
+                type="button"
+                className={cn("h-[50px] w-[50px] rounded-full bg-white flex items-center justify-center", PILL_SHADOW)}
+                aria-label="notifications"
+              >
+                <Bell className="h-6 w-6" style={{ color: TOK.tabBlue }} />
+              </button>
             </div>
-            <p className="text-gray-500 font-medium">Tidak ada data nilai untuk filter ini.</p>
           </div>
-        ) : (
-          filteredGrades.map((grade) => (
-            <GradeCard key={grade.id} grade={grade} />
-          ))
-        )}
+
+          {/* Tabs */}
+          <div className="mt-12 flex items-center gap-6">
+            {userClasses.map((cls, idx) => (
+              <TabButton 
+                key={cls.id} 
+                label={cls.name} 
+                active={activeTab === cls.name} 
+                onClick={() => handleTabChange(cls.name)}
+                colorIndex={idx}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* LIST */}
+        <div className="mt-14 px-12">
+          {filteredCards.length === 0 ? (
+            <div className="text-center py-20 text-gray-500">
+              Belum ada tugas yang dinilai untuk kelas ini.
+            </div>
+          ) : (
+            <div className="space-y-12">
+              {filteredCards.map((item) => (
+                <GradeCard key={item.id} item={item} onToggle={toggleCard} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
